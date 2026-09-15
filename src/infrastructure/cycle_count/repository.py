@@ -59,3 +59,21 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
         self.session.add(model)
         await self.session.commit()
         return record
+
+    async def save_records(self, records: List[CycleCountRecord]) -> List[CycleCountRecord]:
+        models = [
+            CycleCountRecordModel(
+                id=record.id,
+                tenant_id=record.tenant_id,
+                plan_id=record.plan_id,
+                name=record.name,
+                status=record.status,
+                abc_classification=record.abc_classification,
+                zone=record.zone,
+                is_blind_count=record.is_blind_count,
+                created_at=record.created_at
+            ) for record in records
+        ]
+        self.session.add_all(models)
+        await self.session.commit()
+        return records

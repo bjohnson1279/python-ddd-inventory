@@ -46,8 +46,8 @@ async def schedule_audits(req: ScheduleRequestDTO, db: AsyncSession = Depends(ge
     # Mocking last execution dates empty for now
     audits = scheduler.generate_audits(plans, {})
     
-    for audit in audits:
-        await repo.save_record(audit)
+    if audits:
+        await repo.save_records(audits)
         
     return {"scheduled": len(audits), "audits": audits}
 
