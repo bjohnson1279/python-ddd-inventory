@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from datetime import datetime, timezone
 import csv
 import io
