@@ -3,12 +3,13 @@ from datetime import datetime, timezone
 import uuid
 from typing import Optional
 from .value_objects import SKU, Money
+from src.domain.base_entity import AggregateRoot
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 @dataclass
-class Product:
+class Product(AggregateRoot):
     id: str = field(default_factory=generate_uuid)
     sku: SKU = field(default_factory=lambda: SKU('DUMMY-SKU'))
     name: str = ''
