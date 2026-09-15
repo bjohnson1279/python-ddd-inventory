@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Optional, Callable, Dict, Any
+from typing import List, Optional, Dict, Any
 import uuid
 import logging
 
