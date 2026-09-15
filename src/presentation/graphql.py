@@ -20,7 +20,7 @@ class Query:
     def products(self) -> List[ProductNode]:
         return [ProductNode(id="1", sku="SKU-123", name="Mock Product", price_amount="19.99")]
 
-schema = strawberry.federation.Schema(query=Query, enable_federation_2=True)
+schema = strawberry.federation.Schema(query=Query)
 graphql_app = GraphQLRouter(schema)
 
 def generate_graphql_schema(filepath: str = "schema.graphql"):
