@@ -9,3 +9,8 @@ Vulnerability: Hardcoded default connection URL (`redis://localhost:6379/0`) for
 Learning: Ensure configuration properties default to safe alternatives or actively fail loudly if not configured, rather than implicitly falling back to a risky state.
 Prevention: Validate presence of required infrastructure configuration elements on application startup, preferring strict failing behavior over unverified assumptions.
 
+## 2023-10-24 - [CRITICAL] Prevented SSRF and Unencrypted Data Transmission in Webhooks
+**Vulnerability:** The webhook delivery engine (`src/application/workers/webhook_worker.py`) lacked URL validation before enqueueing webhook requests. This allowed for Server-Side Request Forgery (SSRF), where an attacker could force the server to make requests to internal services (e.g., `localhost` or `169.254.169.254`). It also lacked a requirement for HTTPS, leading to potential unencrypted transmission of sensitive payloads and signatures over the network.
+**Learning:** Webhook delivery engines are high-risk targets for SSRF and must validate outbound URLs before connecting to them. Relying solely on clients providing valid URLs is dangerous in multi-tenant environments or public APIs.
+**Prevention:** Implemented URL scheme verification to enforce `https://` and added domain blocking for `localhost`, `127.0.0.1`, `0.0.0.0`, and AWS instance metadata IP prefixes (`169.254.`) prior to enqueuing the job.
+
