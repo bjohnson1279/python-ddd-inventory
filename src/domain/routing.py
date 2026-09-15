@@ -36,12 +36,12 @@ class OrderRoutingEngine:
     def __init__(self, locations: List[Location], stock_levels: List[StockLevel]):
         self.locations = {loc.id: loc for loc in locations}
         self.stock_levels = stock_levels
+        # O(N) indexing for O(1) lookups
+        self.stock_index = {(stock.location_id, stock.sku): stock for stock in stock_levels}
 
     def _get_available_qty(self, location_id: str, sku: str) -> int:
-        for stock in self.stock_levels:
-            if stock.location_id == location_id and stock.sku == sku:
-                return stock.available_qty
-        return 0
+        stock = self.stock_index.get((location_id, sku))
+        return stock.available_qty if stock else 0
 
     def route_order(self, customer_lat: float, customer_lon: float, order_lines: List[OrderLine]) -> Dict[str, List[OrderLine]]:
         """
@@ -72,11 +72,10 @@ class OrderRoutingEngine:
                     
                     routing_plan[loc.id].append(OrderLine(sku=line.sku, quantity=allocate))
                     
-                    # Deduct from internal stock levels
-                    for stock in self.stock_levels:
-                        if stock.location_id == loc.id and stock.sku == line.sku:
-                            stock.available_qty -= allocate
-                            break
+                    # Deduct from internal stock levels (O(1) update)
+                    stock = self.stock_index.get((loc.id, line.sku))
+                    if stock:
+                        stock.available_qty -= allocate
                             
                     remaining_qty -= allocate
                     
