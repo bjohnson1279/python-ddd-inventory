@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict
 
 class PNCounter:
     """Positive-Negative Counter CRDT for distributed stock counting."""
