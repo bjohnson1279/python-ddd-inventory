@@ -18,6 +18,15 @@ class WebhookDeliveryEngine:
         self._running = False
 
     def enqueue_webhook(self, url: str, payload: Dict[str, Any], max_retries: int = 3):
+        import urllib.parse
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            raise ValueError("Webhook URL must use HTTPS to prevent unencrypted sensitive data transmission")
+
+        # Basic SSRF prevention
+        if parsed.hostname in ("localhost", "127.0.0.1", "0.0.0.0") or (parsed.hostname and parsed.hostname.startswith("169.254.")):
+            raise ValueError("SSRF blocked: local or internal IP addresses are not allowed")
+
         self._queue.append({
             "url": url,
             "payload": payload,
