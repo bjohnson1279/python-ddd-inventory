@@ -1,6 +1,8 @@
 import asyncio
 import logging
 from sqlalchemy.future import select
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.database import async_session
 from src.infrastructure.messaging.models import OutboxEventModel
 from src.infrastructure.messaging.kafka_publisher import KafkaPublisher
@@ -35,18 +37,25 @@ class OutboxWorker:
             result = await session.execute(stmt)
             events = result.scalars().all()
 
+            if not events:
+                return
+
+            event_ids = []
             for event in events:
+                # IMPORTANT: Keep network I/O sequential to preserve event ordering.
                 await self.publisher.publish(
                     topic=f"inventory.{event.aggregate_type}.events",
                     key=event.aggregate_id,
                     message=event.payload
                 )
                 
-                # Invalidate tier-2 cache
+                # Invalidate tier-2 cache sequentially as well
                 await DistributedCache.invalidate(f"{event.aggregate_type}:{event.aggregate_id}")
                 
-                await session.delete(event)
+                event_ids.append(event.id)
             
-            if events:
-                await session.commit()
+            # Perform bulk delete to eliminate N+1 query issue
+            delete_stmt = delete(OutboxEventModel).where(OutboxEventModel.id.in_(event_ids))
+            await session.execute(delete_stmt)
+            await session.commit()
 
