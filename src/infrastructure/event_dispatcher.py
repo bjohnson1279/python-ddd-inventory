@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Callable, Awaitable, List, Dict, Type
 from src.domain.events import DomainEvent
