@@ -1,10 +1,12 @@
 import os
 os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///:memory:'
+os.environ['REDIS_URL'] = 'redis://localhost:6379/0'
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+
 from src.infrastructure.database import Base, get_db_session
 from src.presentation.main import app
 
