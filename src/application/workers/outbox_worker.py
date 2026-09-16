@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from sqlalchemy import delete
 from sqlalchemy.future import select
 from src.infrastructure.database import async_session
 from src.infrastructure.messaging.models import OutboxEventModel
@@ -44,9 +45,12 @@ class OutboxWorker:
                 
                 # Invalidate tier-2 cache
                 await DistributedCache.invalidate(f"{event.aggregate_type}:{event.aggregate_id}")
-                
-                await session.delete(event)
             
             if events:
+                # ⚡ Bulk delete processed events to avoid N+1 query bottleneck
+                event_ids = [e.id for e in events]
+                await session.execute(
+                    delete(OutboxEventModel).where(OutboxEventModel.id.in_(event_ids))
+                )
                 await session.commit()
 
