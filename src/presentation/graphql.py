@@ -1,7 +1,6 @@
 import strawberry
 from strawberry.fastapi import GraphQLRouter
 from typing import List
-import json
 
 @strawberry.type
 class ProductNode:
