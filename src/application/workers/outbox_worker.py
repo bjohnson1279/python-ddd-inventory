@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from sqlalchemy.future import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.database import async_session
 from src.infrastructure.messaging.models import OutboxEventModel
 from src.infrastructure.messaging.kafka_publisher import KafkaPublisher
