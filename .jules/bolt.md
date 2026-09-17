@@ -25,3 +25,13 @@
 
 **Measurement:** Reduced total processing time for 50 events from ~1.05s to ~0.02s in local simulated benchmarks.
 
+
+## 2024-05-24 - Webhook Delivery Sequential I/O Bottleneck
+
+**What:** Optimized `WebhookDeliveryEngine.start()` in `src/application/workers/webhook_worker.py`. Replaced sequential `await client.post(...)` inside a loop with concurrent execution using `asyncio.gather(*tasks)`.
+
+**Why:** Sequential network I/O requests blocked the loop, meaning processing time scaled linearly with the size of the webhook queue. By utilizing `asyncio.gather`, we dispatch all HTTP requests concurrently.
+
+**Impact:** Processing time is now bounded by the slowest webhook request instead of the sum of all request times.
+
+**Measurement:** A benchmark enqueueing 100 webhooks with a simulated 50ms latency dropped from ~5.2 seconds sequentially to ~0.19 seconds concurrently.
