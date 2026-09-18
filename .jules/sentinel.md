@@ -14,3 +14,8 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Learning:** Webhook delivery engines are high-risk targets for SSRF and must validate outbound URLs before connecting to them. Relying solely on clients providing valid URLs is dangerous in multi-tenant environments or public APIs.
 **Prevention:** Implemented URL scheme verification to enforce `https://` and added domain blocking for `localhost`, `127.0.0.1`, `0.0.0.0`, and AWS instance metadata IP prefixes (`169.254.`) prior to enqueuing the job.
 
+
+## 2024-05-18 - [Critical] Webhook Delivery SSRF via Hostname Bypass
+**Vulnerability:** The outbound Webhook Delivery Engine (`src/application/workers/webhook_worker.py`) performed SSRF validation by merely checking the URL's hostname against a hardcoded list of strings (e.g., "localhost", "127.0.0.1"). This is easily bypassed by using IPv6 loopback (`[::1]`), shorthand IP addresses (`127.1`), or setting up custom DNS records pointing to internal IP ranges (like `localtest.me`).
+**Learning:** SSRF prevention must never rely solely on string matching against hostnames. Attackers have numerous ways to represent internal IPs or resolve domains to them.
+**Prevention:** Always resolve the hostname to its underlying IP address(es) using `socket.getaddrinfo`, then use a robust library like `ipaddress` to strictly check if the resulting IP is loopback, private, link-local, multicast, or unspecified before establishing a connection.
