@@ -25,8 +25,11 @@
 
 **Measurement:** Reduced total processing time for 50 events from ~1.05s to ~0.02s in local simulated benchmarks.
 
-## 2024-05-18 - [Optimization] Avoid dict allocation in get_recommended_frequency
+## 2024-05-24 - [Optimization] Avoid O(N^2) list removal in WebhookDeliveryEngine._queue
+**Learning:** Removing items from a list iteratively (`self._queue.remove(item)`) inside a loop over the items to be processed creates an O(N^2) time complexity, leading to severe performance degradation when processing large queues.
+**Action:** Reconstruct the queue in a single O(N) pass, separating items ready to be processed from items that need to remain in the queue.
 
+## 2024-05-18 - [Optimization] Avoid dict allocation in get_recommended_frequency
 **What:** Moved the dictionary `mapping` inside `ABCClassificationService.get_recommended_frequency` to a module-level constant `RECOMMENDED_FREQUENCY_MAPPING`.
 **Why:** Prevented reallocation and initialization of a static dictionary on every method call, avoiding CPU and memory overhead.
 **Impact:** Execution time reduced significantly.

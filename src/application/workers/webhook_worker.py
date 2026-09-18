@@ -19,13 +19,27 @@ class WebhookDeliveryEngine:
 
     def enqueue_webhook(self, url: str, payload: Dict[str, Any], max_retries: int = 3):
         import urllib.parse
+        import socket
+        import ipaddress
+
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
             raise ValueError("Webhook URL must use HTTPS to prevent unencrypted sensitive data transmission")
 
-        # Basic SSRF prevention
-        if parsed.hostname in ("localhost", "127.0.0.1", "0.0.0.0") or (parsed.hostname and parsed.hostname.startswith("169.254.")):
-            raise ValueError("SSRF blocked: local or internal IP addresses are not allowed")
+        if not parsed.hostname:
+            raise ValueError("Invalid Webhook URL: missing hostname")
+
+        # Robust SSRF prevention
+        try:
+            addr_infos = socket.getaddrinfo(parsed.hostname, None)
+            for addr in addr_infos:
+                ip_str = addr[4][0]
+                ip_obj = ipaddress.ip_address(ip_str)
+                if (ip_obj.is_private or ip_obj.is_loopback or
+                    ip_obj.is_link_local or ip_obj.is_unspecified or ip_obj.is_multicast):
+                    raise ValueError("SSRF blocked: local or internal IP addresses are not allowed")
+        except socket.gaierror:
+            raise ValueError("Invalid Webhook URL: unable to resolve hostname")
 
         self._queue.append({
             "url": url,
@@ -44,10 +58,18 @@ class WebhookDeliveryEngine:
         async with httpx.AsyncClient() as client:
             while self._running:
                 now = datetime.now(timezone.utc)
-                to_process = [item for item in self._queue if item["next_attempt_at"] <= now]
+
+                # Bolt Optimization: O(N) queue reconstruction avoids O(N^2) list.remove() inside the loop
+                to_process = []
+                remaining_queue = []
+                for item in self._queue:
+                    if item["next_attempt_at"] <= now:
+                        to_process.append(item)
+                    else:
+                        remaining_queue.append(item)
+                self._queue = remaining_queue
                 
                 for item in to_process:
-                    self._queue.remove(item)
                     payload_str = str(item["payload"])
                     signature = self._sign_payload(payload_str)
                     
