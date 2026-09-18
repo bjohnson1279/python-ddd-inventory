@@ -50,3 +50,11 @@ async def test_invalidate_pattern_no_keys():
         await DistributedCache.invalidate_pattern('pattern*')
         mock_keys.assert_called_once_with('pattern*')
         mock_delete.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_get_invalid_json():
+    with patch('src.infrastructure.cache.redis_client.get', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = 'invalid json'
+        with pytest.raises(json.JSONDecodeError):
+            await DistributedCache.get('test_invalid')
+        mock_get.assert_called_once_with('test_invalid')
