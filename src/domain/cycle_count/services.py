@@ -2,8 +2,9 @@ from typing import List, Dict
 from datetime import datetime
 from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord
 
+RECOMMENDED_FREQUENCY_MAPPING = {'A': 30, 'B': 90, 'C': 180}
+
 class ABCClassificationService:
-    _RECOMMENDED_FREQUENCY_MAPPING = {'A': 30, 'B': 90, 'C': 180}
 
     def classify_sku(self, total_usage_value: float, total_org_value: float, thresholds: dict = None) -> str:
         if thresholds is None:
@@ -20,7 +21,7 @@ class ABCClassificationService:
         return 'C'
 
     def get_recommended_frequency(self, abc_class: str) -> int:
-        return self._RECOMMENDED_FREQUENCY_MAPPING.get(abc_class, 180)
+        return RECOMMENDED_FREQUENCY_MAPPING.get(abc_class, 180)
 
 class CycleCountScheduler:
     def generate_audits(self, active_plans: List[CycleCountPlan], last_count_dates: Dict[str, datetime]) -> List[CycleCountRecord]:
