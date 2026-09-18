@@ -44,10 +44,18 @@ class WebhookDeliveryEngine:
         async with httpx.AsyncClient() as client:
             while self._running:
                 now = datetime.now(timezone.utc)
-                to_process = [item for item in self._queue if item["next_attempt_at"] <= now]
+
+                # Bolt Optimization: O(N) queue reconstruction avoids O(N^2) list.remove() inside the loop
+                to_process = []
+                remaining_queue = []
+                for item in self._queue:
+                    if item["next_attempt_at"] <= now:
+                        to_process.append(item)
+                    else:
+                        remaining_queue.append(item)
+                self._queue = remaining_queue
                 
                 for item in to_process:
-                    self._queue.remove(item)
                     payload_str = str(item["payload"])
                     signature = self._sign_payload(payload_str)
                     
