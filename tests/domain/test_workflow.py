@@ -100,3 +100,57 @@ def test_workflow_execution_reject_invalid_role():
     # Try to reject an already approved step
     success2 = execution.reject_step("manager", "user_3", "Reject after approve")
     assert success2 is False
+
+def test_workflow_engine_overwrite_template():
+    engine = ApprovalWorkflowEngine()
+    engine.register_template("purchase_order", ["manager", "finance"])
+    engine.register_template("purchase_order", ["director"])
+    assert engine._templates["purchase_order"] == ["director"]
+
+def test_workflow_engine_multiple_executions():
+    engine = ApprovalWorkflowEngine()
+    engine.register_template("purchase_order", ["manager"])
+
+    exec1 = engine.start_workflow("purchase_order", {"id": 1})
+    exec2 = engine.start_workflow("purchase_order", {"id": 2})
+
+    assert exec1.execution_id != exec2.execution_id
+    assert exec1.payload == {"id": 1}
+    assert exec2.payload == {"id": 2}
+
+def test_workflow_execution_approve_after_rejection():
+    engine = ApprovalWorkflowEngine()
+    engine.register_template("purchase_order", ["manager", "finance"])
+    execution = engine.start_workflow("purchase_order", {"amount": 1000})
+
+    # Reject first step
+    execution.reject_step("manager", "user_1", "Rejected")
+    assert execution.status == "REJECTED"
+
+    # Approve second step - shouldn't change overall status
+    success = execution.approve_step("finance", "user_2", "Approved")
+    assert success is True
+    assert execution.steps[1].status == "APPROVED"
+    assert execution.status == "REJECTED" # Overall status remains REJECTED
+
+def test_workflow_engine_empty_roles():
+    engine = ApprovalWorkflowEngine()
+    engine.register_template("auto_approve", [])
+    execution = engine.start_workflow("auto_approve", {})
+
+    assert len(execution.steps) == 0
+    # Evaluate status for empty steps should result in APPROVED
+    execution._evaluate_overall_status()
+    assert execution.status == "APPROVED"
+
+def test_workflow_execution_timestamps():
+    engine = ApprovalWorkflowEngine()
+    engine.register_template("purchase_order", ["manager"])
+    execution = engine.start_workflow("purchase_order", {"amount": 1000})
+
+    assert execution.created_at is not None
+    assert execution.steps[0].approved_at is None
+
+    execution.approve_step("manager", "user_1")
+    assert execution.steps[0].approved_at is not None
+    assert execution.steps[0].approved_at >= execution.created_at
