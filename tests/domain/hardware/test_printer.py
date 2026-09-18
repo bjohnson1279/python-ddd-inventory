@@ -39,3 +39,27 @@ def test_generate_zpl_label_special_characters():
     assert "^XZ" in zpl
     assert sku in zpl
     assert lot in zpl
+
+def test_generate_zpl_label_long_strings():
+    engine = ThermalPrinterEngine()
+    sku = "A" * 1000
+    lot = "B" * 1000
+
+    zpl = engine.generate_zpl_label(sku, lot)
+
+    assert "^XA" in zpl
+    assert "^XZ" in zpl
+    assert sku in zpl
+    assert lot in zpl
+
+def test_generate_zpl_label_unicode():
+    engine = ThermalPrinterEngine()
+    sku = "SKU-🚀"
+    lot = "LOT-📦"
+
+    zpl = engine.generate_zpl_label(sku, lot)
+
+    assert "^XA" in zpl
+    assert "^XZ" in zpl
+    assert sku in zpl
+    assert lot in zpl
