@@ -50,3 +50,18 @@ async def test_invalidate_pattern_no_keys():
         await DistributedCache.invalidate_pattern('pattern*')
         mock_keys.assert_called_once_with('pattern*')
         mock_delete.assert_not_called()
+
+def test_cache_missing_redis_url():
+    import subprocess
+    import sys
+
+    # Run the cache file in a subprocess with empty environment to simulate missing REDIS_URL
+    result = subprocess.run(
+        [sys.executable, "-c", "import src.infrastructure.cache"],
+        capture_output=True,
+        text=True,
+        env={}
+    )
+
+    assert result.returncode != 0
+    assert "CRITICAL: REDIS_URL environment variable is missing!" in result.stderr
