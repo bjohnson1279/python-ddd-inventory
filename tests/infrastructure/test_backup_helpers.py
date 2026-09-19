@@ -167,3 +167,28 @@ class TestDatabaseBackupHelper:
 
         with pytest.raises(subprocess.CalledProcessError):
             helper.restore(filepath)
+
+    @patch('src.infrastructure.backup_helpers.os.makedirs')
+    def test_init_makedirs_failure(self, mock_makedirs):
+        mock_makedirs.side_effect = PermissionError("Permission denied")
+        db_url = "postgresql://user:pass@localhost/db"
+
+        with pytest.raises(PermissionError):
+            DatabaseBackupHelper(db_url)
+
+    @patch('src.infrastructure.backup_helpers.datetime')
+    @patch('src.infrastructure.backup_helpers.subprocess.Popen')
+    @patch('builtins.open')
+    @patch('src.infrastructure.backup_helpers.os.makedirs')
+    def test_backup_file_open_failure(self, mock_makedirs, mock_file, mock_popen, mock_datetime):
+        mock_datetime.datetime.now.return_value.strftime.return_value = "20231026_120000"
+        mock_file.side_effect = IOError("Cannot open file")
+
+        db_url = "postgresql://user:pass@localhost/db"
+        helper = DatabaseBackupHelper(db_url)
+
+        with pytest.raises(IOError, match="Cannot open file"):
+            helper.backup(compress=True)
+
+        # Verify subprocess wasn't called since file open failed
+        mock_popen.assert_not_called()
