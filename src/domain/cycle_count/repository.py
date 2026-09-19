@@ -14,7 +14,3 @@ class CycleCountRepository(ABC):
     @abstractmethod
     async def save_record(self, record: CycleCountRecord) -> CycleCountRecord:
         pass
-
-    @abstractmethod
-    async def save_records(self, records: List[CycleCountRecord]) -> List[CycleCountRecord]:
-        pass
