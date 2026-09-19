@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Callable, Awaitable, List, Dict, Type
 from src.domain.events import DomainEvent
@@ -19,11 +20,16 @@ class EventDispatcher:
     async def dispatch(self, event: DomainEvent):
         event_name = event.event_name
         handlers = self._handlers.get(event_name, [])
-        for handler in handlers:
+        async def safe_handle(handler):
             try:
                 await handler(event)
             except Exception as e:
                 logger.error(f"Error handling event {event_name}: {e}")
+
+        if handlers:
+            # Bolt Optimization: Parallelize sequential event handler dispatches
+            # Impact: Drastically reduces blocking latency when an event triggers multiple I/O bound handlers
+            await asyncio.gather(*(safe_handle(h) for h in handlers))
                 
 # Singleton dispatcher for simplicity, though DI is preferred
 dispatcher = EventDispatcher()
