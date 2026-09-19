@@ -1,3 +1,4 @@
+import os
 import pytest
 from unittest.mock import patch, AsyncMock
 import json
@@ -55,12 +56,13 @@ def test_cache_missing_redis_url():
     import subprocess
     import sys
 
-    # Run the cache file in a subprocess with empty environment to simulate missing REDIS_URL
+    # Run the cache file in a subprocess with empty environment (except essential Windows system vars) to simulate missing REDIS_URL
+    test_env = {k: v for k, v in os.environ.items() if k.upper() in ('SYSTEMROOT', 'WINDIR', 'SYSTEMDRIVE', 'PATH')}
     result = subprocess.run(
         [sys.executable, "-c", "import src.infrastructure.cache"],
         capture_output=True,
         text=True,
-        env={}
+        env=test_env
     )
 
     assert result.returncode != 0
