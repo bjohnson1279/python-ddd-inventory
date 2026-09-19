@@ -4,6 +4,7 @@ from sqlalchemy import text
 from fastapi import Header
 import os
 
+# Security: Do not add fallback default credentials here to prevent hardcoded secrets
 DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is not set")

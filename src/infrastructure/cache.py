@@ -3,9 +3,9 @@ from typing import Any, Optional
 import redis.asyncio as redis
 import os
 
-REDIS_URL = os.getenv('REDIS_URL')
+REDIS_URL = os.environ.get('REDIS_URL')
 if not REDIS_URL:
-    raise ValueError("REDIS_URL environment variable is not set")
+    raise RuntimeError("CRITICAL: REDIS_URL environment variable is missing!")
 redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 
 class DistributedCache:

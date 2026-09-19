@@ -103,3 +103,33 @@ def test_verify_ledger_integrity_tampered_previous_hash():
 
     # Doesn't match current_hash (which is entries[0].hash)
     assert ledger.verify_ledger_integrity() is False
+
+def test_reconstruct_state_empty():
+    ledger = ComplianceLedger()
+    point_in_time = datetime.now(timezone.utc)
+    reconstructed = ledger.reconstruct_state_at("inv-1", point_in_time)
+    assert len(reconstructed) == 0
+
+def test_get_events_for_nonexistent_aggregate():
+    ledger = ComplianceLedger()
+    ledger.append_event("Inventory", "inv-1", "Created", {})
+    events = ledger.get_events_for_aggregate("inv-999")
+    assert len(events) == 0
+
+def test_verify_ledger_integrity_empty():
+    ledger = ComplianceLedger()
+    assert ledger.verify_ledger_integrity() is True
+
+def test_verify_ledger_integrity_single_event():
+    ledger = ComplianceLedger()
+    ledger.append_event("Inventory", "inv-1", "Created", {})
+    assert ledger.verify_ledger_integrity() is True
+
+def test_reconstruct_state_exact_timestamp():
+    ledger = ComplianceLedger()
+    e1 = ledger.append_event("Inventory", "inv-1", "Created", {})
+
+    # Use exact timestamp of the event
+    reconstructed = ledger.reconstruct_state_at("inv-1", e1.timestamp)
+    assert len(reconstructed) == 1
+    assert reconstructed[0].entry_id == e1.entry_id

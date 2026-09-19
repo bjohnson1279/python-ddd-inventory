@@ -25,3 +25,18 @@
 
 **Measurement:** Reduced total processing time for 50 events from ~1.05s to ~0.02s in local simulated benchmarks.
 
+## 2024-05-24 - [Optimization] Avoid O(N^2) list removal in WebhookDeliveryEngine._queue
+**Learning:** Removing items from a list iteratively (`self._queue.remove(item)`) inside a loop over the items to be processed creates an O(N^2) time complexity, leading to severe performance degradation when processing large queues.
+**Action:** Reconstruct the queue in a single O(N) pass, separating items ready to be processed from items that need to remain in the queue.
+
+## 2024-05-18 - [Optimization] Avoid dict allocation in get_recommended_frequency
+**What:** Moved the dictionary `mapping` inside `ABCClassificationService.get_recommended_frequency` to a module-level constant `RECOMMENDED_FREQUENCY_MAPPING`.
+**Why:** Prevented reallocation and initialization of a static dictionary on every method call, avoiding CPU and memory overhead.
+**Impact:** Execution time reduced significantly.
+**Measurement:** 10M iterations took 1.272s before the change, and 0.558s after the change (a roughly 56% execution time reduction).
+
+## Outbox Worker N+1 Database Queries
+**What:** Optimized `_process_outbox` in `src/application/workers/outbox_worker.py`. Replaced individual `session.delete(event)` calls inside a loop with a single bulk delete query, while preserving sequential network I/O calls to maintain outbox event ordering.
+**Why:** Executing an individual database delete query per event creates a severe N+1 database performance bottleneck. Grouping them into a single `where(id.in_(...))` delete scales significantly better.
+**Impact:** Eliminates the N+1 database overhead.
+**Measurement:** The database query portion of processing 500 events reduced from roughly 0.0915s to 0.0769s in local simulated benchmarks.

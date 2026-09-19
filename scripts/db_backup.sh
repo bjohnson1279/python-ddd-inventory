@@ -5,8 +5,13 @@
 set -e
 
 BACKUP_DIR="./backups"
-TIMESTAMP=date +"%Y%m%d_%H%M%S"
-DB_URL=python -c "import os; print(os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/inventory').replace('+asyncpg', ''))"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+DB_URL=$(python -c "import os; print(os.getenv('DATABASE_URL', '').replace('+asyncpg', ''))")
+
+if [ -z "$DB_URL" ]; then
+    echo "DATABASE_URL environment variable is not set"
+    exit 1
+fi
 
 mkdir -p $BACKUP_DIR
 
