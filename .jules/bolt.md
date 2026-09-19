@@ -34,3 +34,7 @@
 **Why:** Prevented reallocation and initialization of a static dictionary on every method call, avoiding CPU and memory overhead.
 **Impact:** Execution time reduced significantly.
 **Measurement:** 10M iterations took 1.272s before the change, and 0.558s after the change (a roughly 56% execution time reduction).
+
+## 2024-05-24 - Asyncio Gather for Sequential I/O loops
+**Learning:** Running `await` sequentially in a `for` loop (e.g. `for item in items: await handler(item)`) creates an O(N) blocking operation where each item waits for the previous one to complete. This is highly inefficient for tasks like broadcasting websockets or dispatching events to multiple handlers.
+**Action:** Use `asyncio.gather(*tasks)` to run independent IO-bound asynchronous tasks concurrently, drastically reducing the total execution time. Make sure to catch exceptions inside the task wrappers so one failing task does not bring down the entire batch.
