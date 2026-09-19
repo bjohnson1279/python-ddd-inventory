@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[DomainEvent], Awaitable[None]]
 
+
 class EventDispatcher:
     def __init__(self):
         self._handlers: Dict[str, List[EventHandler]] = {}
