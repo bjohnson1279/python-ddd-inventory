@@ -52,6 +52,31 @@ class WebhookDeliveryEngine:
     def _sign_payload(self, payload: str) -> str:
         return hmac.new(self.secret_key, payload.encode('utf-8'), hashlib.sha256).hexdigest()
 
+
+    async def _deliver_webhook(self, client: httpx.AsyncClient, item: Dict[str, Any]):
+        payload_str = str(item["payload"])
+        signature = self._sign_payload(payload_str)
+
+        try:
+            response = await client.post(
+                item["url"],
+                json=item["payload"],
+                headers={"X-Webhook-Signature": signature}
+            )
+            response.raise_for_status()
+            logger.info(f"Webhook delivered successfully to {item['url']}")
+        except Exception as e:
+            logger.error(f"Webhook delivery failed for {item['url']}: {e}")
+            item["retries"] += 1
+            if item["retries"] <= item["max_retries"]:
+                # Exponential backoff
+                delay_seconds = 2 ** item["retries"]
+                # For simplicity we just requeue at the back of the line without exact timestamp handling here
+                item["next_attempt_at"] = datetime.now(timezone.utc) # + timedelta in real app
+                self._queue.append(item)
+            else:
+                logger.error(f"Webhook exhausted retries for {item['url']}")
+
     async def start(self):
         self._running = True
         logger.info("Webhook worker started.")
@@ -69,29 +94,10 @@ class WebhookDeliveryEngine:
                         remaining_queue.append(item)
                 self._queue = remaining_queue
                 
-                for item in to_process:
-                    payload_str = str(item["payload"])
-                    signature = self._sign_payload(payload_str)
-                    
-                    try:
-                        response = await client.post(
-                            item["url"], 
-                            json=item["payload"],
-                            headers={"X-Webhook-Signature": signature}
-                        )
-                        response.raise_for_status()
-                        logger.info(f"Webhook delivered successfully to {item['url']}")
-                    except Exception as e:
-                        logger.error(f"Webhook delivery failed for {item['url']}: {e}")
-                        item["retries"] += 1
-                        if item["retries"] <= item["max_retries"]:
-                            # Exponential backoff
-                            delay_seconds = 2 ** item["retries"]
-                            # For simplicity we just requeue at the back of the line without exact timestamp handling here
-                            item["next_attempt_at"] = datetime.now(timezone.utc) # + timedelta in real app
-                            self._queue.append(item)
-                        else:
-                            logger.error(f"Webhook exhausted retries for {item['url']}")
+                # Bolt Optimization: Use asyncio.gather to concurrently deliver webhooks
+                # avoiding O(N) blocking network I/O loop.
+                if to_process:
+                    await asyncio.gather(*(self._deliver_webhook(client, item) for item in to_process))
                             
                 await asyncio.sleep(2)
 
