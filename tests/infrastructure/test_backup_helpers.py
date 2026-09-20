@@ -192,3 +192,13 @@ class TestDatabaseBackupHelper:
 
         # Verify subprocess wasn't called since file open failed
         mock_popen.assert_not_called()
+
+    @patch('src.infrastructure.backup_helpers.os.makedirs')
+    def test_restore_path_traversal(self, mock_makedirs):
+        db_url = "postgresql://user:pass@localhost/db"
+        helper = DatabaseBackupHelper(db_url, "/tmp/backups")
+
+        malicious_filepath = "../../../etc/passwd"
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            helper.restore(malicious_filepath)

@@ -50,6 +50,16 @@ class DatabaseBackupHelper:
 
     def restore(self, filepath: str):
         """Restore database from a snapshot."""
+        # Secure the filepath against path traversal attacks
+        abs_backup_dir = os.path.abspath(self.backup_dir)
+        target_path = os.path.join(self.backup_dir, filepath) if not os.path.isabs(filepath) else filepath
+        abs_target_path = os.path.abspath(target_path)
+        try:
+            if os.path.commonpath([abs_backup_dir, abs_target_path]) != abs_backup_dir:
+                raise ValueError("Path traversal detected")
+        except ValueError:
+            raise ValueError("Path traversal detected")
+
         logger.info(f"Starting database restore from {filepath}...")
         cmd = ["psql", "-d", self.database_url, "-f", filepath]
         
