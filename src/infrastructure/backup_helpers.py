@@ -50,6 +50,12 @@ class DatabaseBackupHelper:
 
     def restore(self, filepath: str):
         """Restore database from a snapshot."""
+        abs_backup_dir = os.path.abspath(self.backup_dir)
+        abs_filepath = os.path.abspath(filepath)
+
+        if os.path.commonpath([abs_backup_dir, abs_filepath]) != abs_backup_dir:
+            raise ValueError("Path traversal detected: backup file must be within the designated backup directory.")
+
         logger.info(f"Starting database restore from {filepath}...")
         cmd = ["psql", "-d", self.database_url, "-f", filepath]
         

@@ -167,3 +167,14 @@ class TestDatabaseBackupHelper:
 
         with pytest.raises(subprocess.CalledProcessError):
             helper.restore(filepath)
+
+    @patch('src.infrastructure.backup_helpers.os.makedirs')
+    def test_restore_path_traversal(self, mock_makedirs):
+        db_url = "postgresql://user:pass@localhost/db"
+        helper = DatabaseBackupHelper(db_url)
+
+        # Test traversing out of backup directory
+        filepath = "/tmp/backups/../../etc/passwd.sql"
+
+        with pytest.raises(ValueError, match="Path traversal detected: backup file must be within the designated backup directory."):
+            helper.restore(filepath)
