@@ -10,7 +10,7 @@ class DatabaseBackupHelper:
 
     def __init__(self, database_url: str, backup_dir: str = "/tmp/backups"):
         self.database_url = database_url
-        self.backup_dir = os.path.abspath(backup_dir)
+        self.backup_dir = backup_dir
         os.makedirs(self.backup_dir, exist_ok=True)
 
     def backup(self, compress: bool = True) -> str:
@@ -51,17 +51,22 @@ class DatabaseBackupHelper:
     def restore(self, filepath: str):
         """Restore database from a snapshot."""
         # Secure the filepath against path traversal attacks
-        abs_filepath = os.path.abspath(filepath)
-        if os.path.commonpath([self.backup_dir, abs_filepath]) != self.backup_dir:
+        abs_backup_dir = os.path.abspath(self.backup_dir)
+        target_path = os.path.join(self.backup_dir, filepath) if not os.path.isabs(filepath) else filepath
+        abs_target_path = os.path.abspath(target_path)
+        try:
+            if os.path.commonpath([abs_backup_dir, abs_target_path]) != abs_backup_dir:
+                raise ValueError("Path traversal detected")
+        except ValueError:
             raise ValueError("Path traversal detected")
 
         logger.info(f"Starting database restore from {filepath}...")
-        cmd = ["psql", "-d", self.database_url, "-f", abs_filepath]
+        cmd = ["psql", "-d", self.database_url, "-f", filepath]
         
         try:
             if filepath.endswith(".gz"):
                 # pipe gunzip to psql
-                p1 = subprocess.Popen(["gunzip", "-c", abs_filepath], stdout=subprocess.PIPE)
+                p1 = subprocess.Popen(["gunzip", "-c", filepath], stdout=subprocess.PIPE)
                 p2 = subprocess.Popen(["psql", "-d", self.database_url], stdin=p1.stdout)
                 p1.stdout.close()
                 p2.communicate()
