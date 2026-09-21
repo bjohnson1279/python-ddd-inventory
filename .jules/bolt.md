@@ -38,3 +38,7 @@
 ## 2024-05-24 - Asyncio Gather for Sequential I/O loops
 **Learning:** Running `await` sequentially in a `for` loop (e.g. `for item in items: await handler(item)`) creates an O(N) blocking operation where each item waits for the previous one to complete. This is highly inefficient for tasks like broadcasting websockets or dispatching events to multiple handlers.
 **Action:** Use `asyncio.gather(*tasks)` to run independent IO-bound asynchronous tasks concurrently, drastically reducing the total execution time. Make sure to catch exceptions inside the task wrappers so one failing task does not bring down the entire batch.
+
+## 2024-05-24 - O(NxM) list evaluation in RBAC decorators
+**Learning:** Found $O(N \times M)$ list evaluations inside the `requires_roles` (`any(role in required_roles for role in user_roles)`) and `requires_permissions` (`all(perm in user_perms for perm in required_permissions)`) decorators. These are evaluated on every request.
+**Action:** Convert the required roles and permissions to sets *outside* the wrapper function (at initialization time) and use set operations (`isdisjoint` and difference `-`) inside the wrapper to reduce the time complexity to $O(N + M)$ and avoid repetitive list traversal.
