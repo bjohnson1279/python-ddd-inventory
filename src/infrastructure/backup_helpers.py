@@ -60,13 +60,13 @@ class DatabaseBackupHelper:
         except ValueError:
             raise ValueError("Path traversal detected")
 
-        logger.info(f"Starting database restore from {filepath}...")
-        cmd = ["psql", "-d", self.database_url, "-f", filepath]
+        logger.info(f"Starting database restore from {abs_target_path}...")
+        cmd = ["psql", "-d", self.database_url, "-f", abs_target_path]
         
         try:
             if filepath.endswith(".gz"):
                 # pipe gunzip to psql
-                p1 = subprocess.Popen(["gunzip", "-c", filepath], stdout=subprocess.PIPE)
+                p1 = subprocess.Popen(["gunzip", "-c", abs_target_path], stdout=subprocess.PIPE)
                 p2 = subprocess.Popen(["psql", "-d", self.database_url], stdin=p1.stdout)
                 p1.stdout.close()
                 p2.communicate()

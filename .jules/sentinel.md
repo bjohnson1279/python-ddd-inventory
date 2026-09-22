@@ -24,3 +24,7 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** The `restore` method in `src/infrastructure/backup_helpers.py` passed the user-provided `filepath` directly to a `subprocess.Popen`/`subprocess.run` command context without validating that the path resolved inside the secure backup directory, allowing potential arbitrary file read or injection.
 **Learning:** Shell commands or processes relying on file paths must strictly validate that the absolute resolved path resides within expected bounds. Path traversal (`../`) can escape intended directories, leading to unauthorized operations against sensitive system files like `/etc/passwd`.
 **Prevention:** To mitigate path traversal vulnerabilities, always use `os.path.abspath(filepath)` and enforce directory bounds using `os.path.commonpath([base_dir, abs_filepath]) == base_dir` prior to engaging the resource.
+## 2024-10-26 - [Path Traversal]
+**Vulnerability:** Path traversal validation bypass in database restore.
+**Learning:** Validating a path traversal using `os.path.commonpath` is insufficient if the original, unvalidated user input is subsequently used in file operations (like subprocess commands). The validation check occurs, but the vulnerability remains if the raw input is passed to the execution context.
+**Prevention:** Always use the resolved, validated absolute path (e.g., `abs_target_path`) instead of the original raw input in all subsequent operations.

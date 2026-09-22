@@ -202,3 +202,17 @@ class TestDatabaseBackupHelper:
 
         with pytest.raises(ValueError, match="Path traversal detected"):
             helper.restore(malicious_filepath)
+
+    @patch('src.infrastructure.backup_helpers.subprocess.run')
+    @patch('src.infrastructure.backup_helpers.os.makedirs')
+    def test_restore_uses_absolute_path_for_relative_input(self, mock_makedirs, mock_run):
+        db_url = "postgresql://user:pass@localhost/db"
+        helper = DatabaseBackupHelper(db_url, "/tmp/backups")
+
+        # When passed a relative path, it should use the absolute resolved path in the subprocess
+        relative_filepath = "backup_2023.sql"
+        expected_abs_path = os.path.abspath(os.path.join("/tmp/backups", relative_filepath))
+
+        helper.restore(relative_filepath)
+
+        mock_run.assert_called_once_with(["psql", "-d", db_url, "-f", expected_abs_path], check=True)
