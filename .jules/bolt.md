@@ -42,3 +42,7 @@
 ## 2024-05-24 - O(NxM) list evaluation in RBAC decorators
 **Learning:** Found $O(N \times M)$ list evaluations inside the `requires_roles` (`any(role in required_roles for role in user_roles)`) and `requires_permissions` (`all(perm in user_perms for perm in required_permissions)`) decorators. These are evaluated on every request.
 **Action:** Convert the required roles and permissions to sets *outside* the wrapper function (at initialization time) and use set operations (`isdisjoint` and difference `-`) inside the wrapper to reduce the time complexity to $O(N + M)$ and avoid repetitive list traversal.
+
+## 2024-05-24 - [Optimization] Avoid O(N^2) list removal in CrossDockingEngine.process_inbound_asn
+**Learning:** Iterating over a list (or a copy of it via `list()`) and calling `list.remove()` inside the loop for items that need to be deleted is an O(N^2) operation. In `CrossDockingEngine`, this caused major performance degradation for large queues of pending orders.
+**Action:** Always reconstruct the list in a single O(N) pass by creating a new list, appending the elements that should remain, and reassigning the reference (e.g., `new_list = [item for item in old_list if condition]; old_list = new_list`).
