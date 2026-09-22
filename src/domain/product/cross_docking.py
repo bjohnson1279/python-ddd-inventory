@@ -36,20 +36,22 @@ class CrossDockingEngine:
         cross_dock_assignments = {}
         remaining_qty = asn.quantity
         
+        # Bolt Optimization: O(N) queue reconstruction avoids O(N^2) list.remove() inside the loop
+        new_pending = []
+
         # Sort or filter pending orders by priority/date (simplified here)
-        for order in list(self.pending_outbound):
-            if remaining_qty <= 0:
-                break
-                
-            if order.sku == asn.sku:
+        for order in self.pending_outbound:
+            if remaining_qty > 0 and order.sku == asn.sku:
                 allocated = min(remaining_qty, order.quantity)
                 cross_dock_assignments[order.order_id] = allocated
                 order.quantity -= allocated
                 remaining_qty -= allocated
                 
-                if order.quantity == 0:
-                    self.pending_outbound.remove(order)
+            if order.quantity > 0:
+                new_pending.append(order)
                     
+        self.pending_outbound = new_pending
+
         # If remaining_qty > 0, it means it must go through standard put-away to bins.
         # Otherwise, the entire ASN was cross-docked.
         
