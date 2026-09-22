@@ -28,3 +28,11 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** Path traversal validation bypass in database restore.
 **Learning:** Validating a path traversal using `os.path.commonpath` is insufficient if the original, unvalidated user input is subsequently used in file operations (like subprocess commands). The validation check occurs, but the vulnerability remains if the raw input is passed to the execution context.
 **Prevention:** Always use the resolved, validated absolute path (e.g., `abs_target_path`) instead of the original raw input in all subsequent operations.
+
+
+## Prevention Directives for Automated Refactoring
+- **Never Overwrite Complete Files**: Always use range-scoped replacement chunks (`StartLine`/`EndLine`).
+- **No Scratch Files**: Never stage or commit `test_*.ts`, `test_*.js`, `test.js`, or `plan.md` files to git.
+- **No Unresolved Conflict Markers**: Never stage or commit files containing Git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Always resolve conflicts cleanly before committing.
+- **Path Normalization Compatibility**: When passing paths to subprocesses or external APIs, use absolute normalized paths (e.g., `os.path.abspath`) so tests pass on both Linux and Windows.
+- **Zero-Diff Task Termination**: If the requested optimization, refactor, or fix is ALREADY natively present in the target branch, DO NOT create an empty pull request or commit an acknowledgment PR. Exit the task cleanly without opening a PR.

@@ -46,3 +46,11 @@
 ## 2024-05-24 - [Optimization] Avoid O(N^2) list removal in CrossDockingEngine.process_inbound_asn
 **Learning:** Iterating over a list (or a copy of it via `list()`) and calling `list.remove()` inside the loop for items that need to be deleted is an O(N^2) operation. In `CrossDockingEngine`, this caused major performance degradation for large queues of pending orders.
 **Action:** Always reconstruct the list in a single O(N) pass by creating a new list, appending the elements that should remain, and reassigning the reference (e.g., `new_list = [item for item in old_list if condition]; old_list = new_list`).
+
+
+## Prevention Directives for Automated Refactoring
+- **Never Overwrite Complete Files**: Always use range-scoped replacement chunks (`StartLine`/`EndLine`).
+- **No Scratch Files**: Never stage or commit `test_*.ts`, `test_*.js`, `test.js`, or `plan.md` files to git.
+- **No Unresolved Conflict Markers**: Never stage or commit files containing Git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Always resolve conflicts cleanly before committing.
+- **Path Normalization Compatibility**: When passing paths to subprocesses or external APIs, use absolute normalized paths (e.g., `os.path.abspath`) so tests pass on both Linux and Windows.
+- **Zero-Diff Task Termination**: If the requested optimization, refactor, or fix is ALREADY natively present in the target branch, DO NOT create an empty pull request or commit an acknowledgment PR. Exit the task cleanly without opening a PR.

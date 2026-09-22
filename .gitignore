@@ -6,3 +6,10 @@ __pycache__/
 *.pyd
 .env
 .coverage
+
+# Bot scratch verification files
+test.js
+test_*.ts
+test_*.js
+*.scratch
+plan.md
