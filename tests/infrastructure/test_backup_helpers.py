@@ -120,11 +120,12 @@ class TestDatabaseBackupHelper:
         db_url = "postgresql://user:pass@localhost/db"
         helper = DatabaseBackupHelper(db_url)
         filepath = "/tmp/backups/db_backup_20231026_120000.sql.gz"
+        expected_path = os.path.abspath(filepath)
 
         helper.restore(filepath)
 
         assert mock_popen.call_count == 2
-        mock_popen.assert_any_call(["gunzip", "-c", filepath], stdout=subprocess.PIPE)
+        mock_popen.assert_any_call(["gunzip", "-c", expected_path], stdout=subprocess.PIPE)
         mock_popen.assert_any_call(["psql", "-d", db_url], stdin=mock_p1.stdout)
 
         mock_p1.stdout.close.assert_called_once()
@@ -136,10 +137,11 @@ class TestDatabaseBackupHelper:
         db_url = "postgresql://user:pass@localhost/db"
         helper = DatabaseBackupHelper(db_url)
         filepath = "/tmp/backups/db_backup_20231026_120000.sql"
+        expected_path = os.path.abspath(filepath)
 
         helper.restore(filepath)
 
-        mock_run.assert_called_once_with(["psql", "-d", db_url, "-f", filepath], check=True)
+        mock_run.assert_called_once_with(["psql", "-d", db_url, "-f", expected_path], check=True)
 
     @patch('src.infrastructure.backup_helpers.subprocess.Popen')
     @patch('src.infrastructure.backup_helpers.os.makedirs')
