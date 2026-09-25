@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.database import get_db_session
 from src.infrastructure.product.repository import SQLAlchemyProductRepository
 from src.application.product.services import ProductService
+from src.infrastructure.auth.rbac import requires_roles
 from src.domain.product.exceptions import ProductNotFoundError, InvalidSKUError, InvalidPriceError
 
 router = APIRouter(prefix='/products', tags=['products'])
@@ -27,7 +28,8 @@ def get_product_service(session: AsyncSession = Depends(get_db_session)) -> Prod
     return ProductService(repo)
 
 @router.post('', response_model=ProductResponseDTO, status_code=201)
-async def create_product(data: ProductCreateDTO, service: ProductService = Depends(get_product_service)):
+@requires_roles(["ADMIN"])
+async def create_product(data: ProductCreateDTO, request: Request, service: ProductService = Depends(get_product_service)):
     try:
         product = await service.create_product(
             sku=data.sku,
