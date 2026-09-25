@@ -41,6 +41,8 @@ class ComplianceLedger:
         # In memory representation, usually backed by an append-only DB table
         self._entries: List[LedgerEntry] = []
         self._latest_hash: str = "GENESIS_HASH"
+        # O(1) index for faster aggregate state reconstruction
+        self._aggregate_index: Dict[str, List[LedgerEntry]] = {}
         
     def append_event(self, aggregate_type: str, aggregate_id: str, event_type: str, payload: Dict[str, Any]) -> LedgerEntry:
         entry = LedgerEntry(
@@ -53,11 +55,17 @@ class ComplianceLedger:
         entry.hash = entry.compute_hash()
         self._latest_hash = entry.hash
         self._entries.append(entry)
+
+        # Update O(1) index
+        if aggregate_id not in self._aggregate_index:
+            self._aggregate_index[aggregate_id] = []
+        self._aggregate_index[aggregate_id].append(entry)
+
         return entry
 
     def get_events_for_aggregate(self, aggregate_id: str) -> List[LedgerEntry]:
         """Retrieves the event stream for a specific aggregate."""
-        return [e for e in self._entries if e.aggregate_id == aggregate_id]
+        return self._aggregate_index.get(aggregate_id, [])
 
     def reconstruct_state_at(self, aggregate_id: str, point_in_time: datetime) -> List[LedgerEntry]:
         """
@@ -65,9 +73,10 @@ class ComplianceLedger:
         Returns the stream of events up to the given timestamp, which can be folded
         to project the exact state of the aggregate at that point in time.
         """
+        events = self._aggregate_index.get(aggregate_id, [])
         return [
-            e for e in self._entries 
-            if e.aggregate_id == aggregate_id and e.timestamp <= point_in_time
+            e for e in events
+            if e.timestamp <= point_in_time
         ]
 
     def verify_ledger_integrity(self) -> bool:
