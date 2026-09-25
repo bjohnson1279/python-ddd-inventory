@@ -1,6 +1,7 @@
 import os
 os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///:memory:'
 os.environ['REDIS_URL'] = 'redis://localhost:6379/0'
+from unittest.mock import patch
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
@@ -38,3 +39,8 @@ async def client(db_session):
         yield test_client
     app.dependency_overrides.clear()
 
+
+@pytest_asyncio.fixture(autouse=True)
+def mock_rbac():
+    with patch('src.infrastructure.auth.rbac.get_current_user_roles', return_value=["ADMIN"]):
+        yield

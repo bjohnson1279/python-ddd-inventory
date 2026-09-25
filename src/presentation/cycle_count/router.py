@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +6,7 @@ from src.infrastructure.database import get_db_session
 from src.domain.cycle_count.entity import CycleCountPlan
 from src.domain.cycle_count.services import ABCClassificationService, CycleCountScheduler
 from src.infrastructure.cycle_count.repository import SQLAlchemyCycleCountRepository
+from src.infrastructure.auth.rbac import requires_roles
 
 router = APIRouter(prefix='/api/cycle-counts', tags=['CycleCount'])
 
@@ -25,7 +26,8 @@ class ClassifyRequestDTO(BaseModel):
     thresholds: Optional[dict] = None
 
 @router.post('/plans')
-async def create_plan(req: PlanCreateDTO, db: AsyncSession = Depends(get_db_session)):
+@requires_roles(["ADMIN"])
+async def create_plan(req: PlanCreateDTO, request: Request, db: AsyncSession = Depends(get_db_session)):
     repo = SQLAlchemyCycleCountRepository(db)
     plan = CycleCountPlan(
         tenant_id=req.tenant_id,
@@ -38,7 +40,8 @@ async def create_plan(req: PlanCreateDTO, db: AsyncSession = Depends(get_db_sess
     return saved
 
 @router.post('/schedule')
-async def schedule_audits(req: ScheduleRequestDTO, db: AsyncSession = Depends(get_db_session)):
+@requires_roles(["ADMIN"])
+async def schedule_audits(req: ScheduleRequestDTO, request: Request, db: AsyncSession = Depends(get_db_session)):
     repo = SQLAlchemyCycleCountRepository(db)
     scheduler = CycleCountScheduler()
     
@@ -52,7 +55,8 @@ async def schedule_audits(req: ScheduleRequestDTO, db: AsyncSession = Depends(ge
     return {"scheduled": len(audits), "audits": audits}
 
 @router.post('/classify')
-async def classify_sku(req: ClassifyRequestDTO):
+@requires_roles(["ADMIN"])
+async def classify_sku(req: ClassifyRequestDTO, request: Request):
     service = ABCClassificationService()
     abc_class = service.classify_sku(req.total_usage_value, req.total_org_value, req.thresholds)
     freq = service.get_recommended_frequency(abc_class)
