@@ -54,3 +54,7 @@
 - **No Unresolved Conflict Markers**: Never stage or commit files containing Git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Always resolve conflicts cleanly before committing.
 - **Path Normalization Compatibility**: When passing paths to subprocesses or external APIs, use absolute normalized paths (e.g., `os.path.abspath`) so tests pass on both Linux and Windows.
 - **Zero-Diff Task Termination**: If the requested optimization, refactor, or fix is ALREADY natively present in the target branch, DO NOT create an empty pull request or commit an acknowledgment PR. Exit the task cleanly without opening a PR.
+
+## 2024-05-24 - O(1) Indexing for ComplianceLedger state reconstruction
+**Learning:** The `ComplianceLedger` utilized $O(N)$ full list scans (`[e for e in self._entries if e.aggregate_id == aggregate_id]`) in `get_events_for_aggregate` and `reconstruct_state_at` to retrieve an aggregate's event stream. As the ledger append-only log grew, state reconstruction slowed significantly (an $O(N)$ operation for each aggregate reconstruction).
+**Action:** Introduced an $O(1)$ dictionary-based aggregate index (`self._aggregate_index: Dict[str, List[LedgerEntry]]`) mapping `aggregate_id` to its corresponding list of events. The index is updated in $O(1)$ during `append_event`, eliminating the costly $O(N)$ scans during state reads and reconstruction.
