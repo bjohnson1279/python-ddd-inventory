@@ -54,3 +54,7 @@
 - **No Unresolved Conflict Markers**: Never stage or commit files containing Git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Always resolve conflicts cleanly before committing.
 - **Path Normalization Compatibility**: When passing paths to subprocesses or external APIs, use absolute normalized paths (e.g., `os.path.abspath`) so tests pass on both Linux and Windows.
 - **Zero-Diff Task Termination**: If the requested optimization, refactor, or fix is ALREADY natively present in the target branch, DO NOT create an empty pull request or commit an acknowledgment PR. Exit the task cleanly without opening a PR.
+
+## 2024-05-24 - [Optimization] Avoid O(N) dynamic evaluation in dict.get fallback
+**Learning:** Found an O(N) performance hit in `PredictiveEngine.detect_anomalies` due to `datetime.datetime.now()` being evaluated on every iteration when passed as a fallback default to `dict.get()`. Python evaluates arguments eagerly before passing them to the function, so the default value is computed every time even if the key exists.
+**Action:** Extract dynamic default values (like `datetime.datetime.now()`) outside of the loop and cache them, or use conditional logic (`value = obj.get("key"); if value is None: value = func()`) to avoid executing expensive functions on every iteration unnecessarily.
