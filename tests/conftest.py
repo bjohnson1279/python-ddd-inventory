@@ -34,7 +34,11 @@ async def client(db_session):
         yield db_session
 
     app.dependency_overrides[get_db_session] = override_get_db_session
-    with TestClient(app) as test_client:
-        yield test_client
+
+    from unittest.mock import patch
+    with patch("src.infrastructure.auth.rbac.get_current_user_roles", return_value=["ADMIN", "MANAGER", "USER"]):
+        with TestClient(app) as test_client:
+            yield test_client
+
     app.dependency_overrides.clear()
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +6,7 @@ from src.infrastructure.database import get_db_session
 from src.infrastructure.product.repository import SQLAlchemyProductRepository
 from src.application.product.services import ProductService
 from src.domain.product.exceptions import ProductNotFoundError, InvalidSKUError, InvalidPriceError
+from src.infrastructure.auth.rbac import requires_roles
 
 router = APIRouter(prefix='/products', tags=['products'])
 
@@ -27,7 +28,8 @@ def get_product_service(session: AsyncSession = Depends(get_db_session)) -> Prod
     return ProductService(repo)
 
 @router.post('', response_model=ProductResponseDTO, status_code=201)
-async def create_product(data: ProductCreateDTO, service: ProductService = Depends(get_product_service)):
+@requires_roles(['ADMIN', 'MANAGER'])
+async def create_product(data: ProductCreateDTO, request: Request, service: ProductService = Depends(get_product_service)):
     try:
         product = await service.create_product(
             sku=data.sku,
@@ -46,7 +48,8 @@ async def create_product(data: ProductCreateDTO, service: ProductService = Depen
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get('/{product_id}', response_model=ProductResponseDTO)
-async def get_product(product_id: str, service: ProductService = Depends(get_product_service)):
+@requires_roles(['ADMIN', 'MANAGER', 'USER'])
+async def get_product(product_id: str, request: Request, service: ProductService = Depends(get_product_service)):
     try:
         product = await service.get_product(product_id)
         return ProductResponseDTO(
@@ -60,7 +63,8 @@ async def get_product(product_id: str, service: ProductService = Depends(get_pro
         raise HTTPException(status_code=404, detail=str(e))
 
 @router.get('', response_model=List[ProductResponseDTO])
-async def list_products(limit: int = 100, offset: int = 0, service: ProductService = Depends(get_product_service)):
+@requires_roles(['ADMIN', 'MANAGER', 'USER'])
+async def list_products(request: Request, limit: int = 100, offset: int = 0, service: ProductService = Depends(get_product_service)):
     products = await service.list_products(limit, offset)
     return [
         ProductResponseDTO(
