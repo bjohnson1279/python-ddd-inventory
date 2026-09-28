@@ -54,3 +54,7 @@
 - **No Unresolved Conflict Markers**: Never stage or commit files containing Git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Always resolve conflicts cleanly before committing.
 - **Path Normalization Compatibility**: When passing paths to subprocesses or external APIs, use absolute normalized paths (e.g., `os.path.abspath`) so tests pass on both Linux and Windows.
 - **Zero-Diff Task Termination**: If the requested optimization, refactor, or fix is ALREADY natively present in the target branch, DO NOT create an empty pull request or commit an acknowledgment PR. Exit the task cleanly without opening a PR.
+
+## 2024-05-24 - [Optimization] Avoid repetitive eager evaluation of datetime.now()
+**Learning:** Found a major performance bottleneck where `datetime.datetime.now()` was used as a fallback argument in a dictionary lookup `txn.get("timestamp", datetime.datetime.now())` inside a loop over a large dataset. Python eagerly evaluates function calls passed as arguments, meaning `datetime.now()` was executed 1,000,000 times even when the transaction already had a timestamp.
+**Action:** Always cache dynamically evaluated values like `datetime.now()` outside the loop if they can be reused as fallbacks. Additionally, when looping over large datasets looking for edge cases, always check primitive threshold logic (e.g., `qty_adj < -50`) to short-circuit execution before performing expensive dictionary lookups or accessing object properties.
