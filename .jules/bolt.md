@@ -54,3 +54,7 @@
 - **No Unresolved Conflict Markers**: Never stage or commit files containing Git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Always resolve conflicts cleanly before committing.
 - **Path Normalization Compatibility**: When passing paths to subprocesses or external APIs, use absolute normalized paths (e.g., `os.path.abspath`) so tests pass on both Linux and Windows.
 - **Zero-Diff Task Termination**: If the requested optimization, refactor, or fix is ALREADY natively present in the target branch, DO NOT create an empty pull request or commit an acknowledgment PR. Exit the task cleanly without opening a PR.
+
+## 2024-05-24 - Avoid eager evaluation of fallback values in dict.get()
+**Learning:** Functions like `datetime.datetime.now()` passed as default fallback arguments in `dict.get()` (e.g., `txn.get("timestamp", datetime.datetime.now())`) are eagerly evaluated on every loop iteration regardless of key presence. Inside a loop with many items, this creates a significant bottleneck.
+**Action:** Always cache the dynamically generated fallback value (like current time) into a variable outside of the loop, then pass that variable into `dict.get()`.

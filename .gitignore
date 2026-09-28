@@ -13,3 +13,4 @@ test_*.ts
 test_*.js
 *.scratch
 plan.md
+test_perf.py

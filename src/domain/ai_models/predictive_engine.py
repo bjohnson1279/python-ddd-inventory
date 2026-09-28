@@ -45,9 +45,15 @@ class PredictiveEngine:
         Flags inventory theft, damage, or data entry errors using isolation forests or heuristics.
         """
         anomalies = []
+
+        # Bolt Optimization: Cache datetime.datetime.now() outside the loop
+        # Impact: Prevents eager evaluation of dynamic functions within the loop on every iteration,
+        # which creates a significant bottleneck for large datasets in dict.get().
+        fallback_time = datetime.datetime.now()
+
         for txn in recent_transactions:
             # Mock heuristic: large negative adjustments on high value items at 3 AM
-            hour = txn.get("timestamp", datetime.datetime.now()).hour
+            hour = txn.get("timestamp", fallback_time).hour
             qty_adj = txn.get("quantity_adjustment", 0)
             if qty_adj < -50 and (hour < 5 or hour > 23):
                 anomalies.append(txn)
