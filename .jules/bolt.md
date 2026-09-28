@@ -58,3 +58,7 @@
 ## 2024-05-24 - Avoid eager evaluation of fallback values in dict.get()
 **Learning:** Functions like `datetime.datetime.now()` passed as default fallback arguments in `dict.get()` (e.g., `txn.get("timestamp", datetime.datetime.now())`) are eagerly evaluated on every loop iteration regardless of key presence. Inside a loop with many items, this creates a significant bottleneck.
 **Action:** Always cache the dynamically generated fallback value (like current time) into a variable outside of the loop, then pass that variable into `dict.get()`.
+
+## 2024-05-24 - O(1) Indexing for ComplianceLedger state reconstruction
+**Learning:** The `ComplianceLedger` utilized $O(N)$ full list scans (`[e for e in self._entries if e.aggregate_id == aggregate_id]`) in `get_events_for_aggregate` and `reconstruct_state_at` to retrieve an aggregate's event stream. As the ledger append-only log grew, state reconstruction slowed significantly (an $O(N)$ operation for each aggregate reconstruction).
+**Action:** Introduced an $O(1)$ dictionary-based aggregate index (`self._aggregate_index: Dict[str, List[LedgerEntry]]`) mapping `aggregate_id` to its corresponding list of events. The index is updated in $O(1)$ during `append_event`, eliminating the costly $O(N)$ scans during state reads and reconstruction.
