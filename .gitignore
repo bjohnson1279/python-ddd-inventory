@@ -14,3 +14,11 @@ test_*.js
 *.scratch
 plan.md
 test_perf.py
+
+test.cjs
+fix_*.cjs
+fix_*.php
+patch_*.py
+patch_*.sh
+update_*.php
+scratch_*
