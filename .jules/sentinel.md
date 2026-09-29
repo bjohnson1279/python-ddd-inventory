@@ -29,6 +29,11 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Learning:** Validating a path traversal using `os.path.commonpath` is insufficient if the original, unvalidated user input is subsequently used in file operations (like subprocess commands). The validation check occurs, but the vulnerability remains if the raw input is passed to the execution context.
 **Prevention:** Always use the resolved, validated absolute path (e.g., `abs_target_path`) instead of the original raw input in all subsequent operations.
 
+## 2026-09-29 - Missing Authentication on Bulk Endpoints
+**Vulnerability:** A critical vulnerability was found where the `/bulk` endpoint in `src/presentation/offline_sync.py` completely lacked authentication/authorization checks (`@requires_roles`), exposing sensitive data ingestion endpoints.
+**Learning:** Background task-heavy or IoT-focused endpoints are often unintentionally left unsecured during rapid development because they are assumed to be "internal" or used by headless clients, completely bypassing standard API gateway or auth middleware protections if they are added piecemeal.
+**Prevention:** Ensure a deny-by-default routing configuration, or run strict linting rules that force all registered endpoints to explicitly define an authorization dependency (even if it's an explicit "Public" role) to prevent routes from being exposed unauthenticated.
+
 
 ## Prevention Directives for Automated Refactoring
 - **Never Overwrite Complete Files**: Always use range-scoped replacement chunks (`StartLine`/`EndLine`).
