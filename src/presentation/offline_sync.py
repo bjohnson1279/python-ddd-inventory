@@ -1,5 +1,6 @@
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel
+from src.infrastructure.auth.rbac import requires_roles
 from typing import List
 import logging
 
@@ -29,7 +30,8 @@ def process_bulk_scans_background(payload: OfflineBufferPayload):
     logger.info(f"Successfully processed {len(payload.scans)} scans.")
 
 @router.post("/bulk")
-async def sync_offline_buffer(payload: OfflineBufferPayload, background_tasks: BackgroundTasks):
+@requires_roles(['ADMIN', 'MANAGER', 'USER'])
+async def sync_offline_buffer(payload: OfflineBufferPayload, request: Request, background_tasks: BackgroundTasks):
     """
     Endpoint for PWA / IoT devices to upload bulk scans collected during network dead zones.
     """
