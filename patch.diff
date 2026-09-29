@@ -1,0 +1,12 @@
+<<<<<<< SEARCH
+    def get_events_for_aggregate(self, aggregate_id: str) -> List[LedgerEntry]:
+        """Retrieves the event stream for a specific aggregate."""
+        # Bolt Optimization: O(1) index lookup instead of O(N) full ledger scan
+        return self._aggregate_index.get(aggregate_id, [])
+=======
+    def get_events_for_aggregate(self, aggregate_id: str) -> List[LedgerEntry]:
+        """Retrieves the event stream for a specific aggregate."""
+        # Bolt Optimization: O(1) index lookup instead of O(N) full ledger scan
+        # Returning a shallow copy to maintain functional parity and avoid caller mutations breaking internal index.
+        return list(self._aggregate_index.get(aggregate_id, []))
+>>>>>>> REPLACE
