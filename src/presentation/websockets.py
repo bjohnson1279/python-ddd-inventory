@@ -1,8 +1,9 @@
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from typing import List, Dict
 import logging
 import json
+from src.infrastructure.auth.rbac import get_current_user_roles
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +44,17 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 @router.websocket("/ws/{tenant_id}")
-async def websocket_endpoint(websocket: WebSocket, tenant_id: str):
+async def websocket_endpoint(websocket: WebSocket, tenant_id: str, user_roles: List[str] = Depends(get_current_user_roles)):
     """
     WebSocket endpoint for Real-Time Collaborative UI sync.
     Broadcasts stock changes, discrepancy updates, and webhook delivery issues.
     """
+    if not user_roles or not set(['ADMIN', 'MANAGER', 'USER']).intersection(user_roles):
+        logger.warning(f"Unauthorized WebSocket connection attempt for tenant {tenant_id}")
+        await websocket.accept()
+        await websocket.close(code=1008)
+        return
+
     await manager.connect(websocket, tenant_id)
     try:
         while True:
