@@ -59,11 +59,17 @@ class LIFOCosting(CostingStrategy):
 class WACCosting(CostingStrategy):
     """Weighted Average Cost costing strategy."""
     def calculate_cost_of_goods_sold(self, quantity_sold: int, batches: List[InventoryBatch]) -> Decimal:
-        total_quantity = sum(b.quantity for b in batches)
+        # Bolt Optimization: Avoid multiple O(N) passes by calculating total quantity and value in a single pass.
+        # Impact: Reduces iteration overhead and speeds up weighted average cost calculations for large batch lists.
+        total_quantity = 0
+        total_value = Decimal('0.00')
+        for b in batches:
+            total_quantity += b.quantity
+            total_value += b.quantity * b.unit_cost
+
         if quantity_sold > total_quantity:
             raise ValueError("Not enough inventory to satisfy the sale quantity.")
             
-        total_value = sum(b.quantity * b.unit_cost for b in batches)
         if total_quantity == 0:
             return Decimal('0.00')
             

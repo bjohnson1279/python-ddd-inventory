@@ -104,3 +104,7 @@
 ## 2026-09-29 - Surgical Optimization Edits and No Scratch Script Commits
 **Learning:** Running whole-file formatters or regenerating entire components while performing performance optimizations introduces massive whitespace/formatting diffs (1,000+ lines), masking the real optimization, invalidating git blame, and causing painful merge conflicts with concurrent PRs. Additionally, committing scratch benchmark or patch scripts (`patch_*.py`, `test.cjs`) pollutes production repositories and triggers CI guardrail failures.
 **Action:** Restrict all algorithmic and performance optimizations to strictly scoped replacement chunks. Diff size must reflect only the functional optimization. Always clean up temporary benchmark or patch scripts with `git rm -f` before committing.
+
+## 2024-05-24 - Single-pass list aggregation for WAC Costing
+**Learning:** Using multiple `sum()` calls with generator comprehensions to calculate different aggregate metrics (like `total_quantity` and `total_value`) from the same list of objects requires multiple O(N) traversals. In large collections (like calculating Weighted Average Cost over many batches), this creates redundant iteration overhead.
+**Action:** Combine the aggregations into a single O(N) `for` loop pass that accumulates all necessary values simultaneously, rather than making multiple passes over the same list.
