@@ -79,3 +79,7 @@ Prevention: Validate presence of required infrastructure configuration elements 
 ## 2026-09-29 - Non-Destructive Security Patching & CI Protection
 **Learning:** Security patches must never weaken CI workflow files (`.github/workflows/**`) by appending `|| true` or `continue-on-error: true` to suppress test/build failures. Furthermore, when adding defensive type assertions or input validators in TypeScript, omitting explicit types can introduce `TS7006: Parameter implicitly has an 'any' type`.
 **Action:** Never modify CI workflow definitions to bypass test failures; resolve the underlying issue in source code or test fixtures. Always provide explicit types on newly introduced parameters and helper functions. Ensure zero scratch scripts (`fix_*.php`, `test_*.js`) are committed.
+## 2025-02-18 - Fix missing authentication on WebSocket endpoint
+**Vulnerability:** The `/ws/{tenant_id}` WebSocket endpoint lacked any authorization checks, allowing unauthenticated connections to subscribe to sensitive real-time broadcasts.
+**Learning:** In FastAPI, standard header-based authentication middleware might not automatically protect WebSocket routes, and manual dependency injection is required for secure endpoints.
+**Prevention:** Ensure all WebSocket endpoints explicitly inject authorization dependencies via `Depends()` in the route signature.
