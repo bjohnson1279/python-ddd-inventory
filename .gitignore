@@ -22,3 +22,7 @@ patch_*.py
 patch_*.sh
 update_*.php
 scratch_*
+
+*.diff
+*.patch
+patch.diff

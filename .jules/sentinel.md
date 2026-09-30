@@ -83,3 +83,8 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** The `/ws/{tenant_id}` WebSocket endpoint lacked any authorization checks, allowing unauthenticated connections to subscribe to sensitive real-time broadcasts.
 **Learning:** In FastAPI, standard header-based authentication middleware might not automatically protect WebSocket routes, and manual dependency injection is required for secure endpoints.
 **Prevention:** Ensure all WebSocket endpoints explicitly inject authorization dependencies via `Depends()` in the route signature.
+
+## Additive Documentation & Scratch Cleanliness Directives
+- **Strictly Additive Journal Updates**: When updating `.jules/*.md`, strictly append new dated entries (`## YYYY-MM-DD - Title`). NEVER delete, truncate, or overwrite historical learnings or previous entries.
+- **Substantive Code Diff Requirement**: Pull requests must include substantive code changes in `src/`, `app/`, `lib/`, or `tests/`. Never open PRs that modify only `.jules/*.md` journals or root scratch scripts.
+- **Zero Scratch File Commits**: Never commit `*.diff`, `*.patch`, `test_*.ts`, `test_*.js`, `test.cjs`, `fix_*.php`, or `patch_*.py` files. Always remove temporary debugging or verification scripts prior to committing.
