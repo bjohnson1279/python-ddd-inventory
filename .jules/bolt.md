@@ -113,3 +113,7 @@
 - **Strictly Additive Journal Updates**: When updating `.jules/*.md`, strictly append new dated entries (`## YYYY-MM-DD - Title`). NEVER delete, truncate, or overwrite historical learnings or previous entries.
 - **Substantive Code Diff Requirement**: Pull requests must include substantive code changes in `src/`, `app/`, `lib/`, or `tests/`. Never open PRs that modify only `.jules/*.md` journals or root scratch scripts.
 - **Zero Scratch File Commits**: Never commit `*.diff`, `*.patch`, `test_*.ts`, `test_*.js`, `test.cjs`, `fix_*.php`, or `patch_*.py` files. Always remove temporary debugging or verification scripts prior to committing.
+
+## 2024-10-01 - O(1) Dictionary Index for RMA Case Lookups
+**Learning:** In `ReverseLogisticsWorkflow`, updating inspection results iterated over the entire `rma_cases` list to find a specific case by its ID. For a large number of RMA cases, this $O(N)$ traversal created a significant performance bottleneck during batch updates.
+**Action:** Introduced an internal dictionary index (`_rma_index`) mapping `case_id` to its corresponding `RMACase` object upon creation. This converts the expensive $O(N)$ list traversal during updates into an $O(1)$ dictionary lookup, dramatically reducing lookup latency.
