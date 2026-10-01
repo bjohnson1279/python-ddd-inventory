@@ -33,3 +33,53 @@ async def test_schedule_audits(async_client):
     })
     assert response.status_code == 200
     assert response.json()["scheduled"] == 1
+
+@pytest.mark.asyncio
+async def test_get_assigned_counts(async_client):
+    # Just checking the endpoint resolves properly without failure
+    response = await async_client.get("/api/cycle-counts/assigned")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+@pytest.mark.asyncio
+async def test_submit_count_matched(async_client):
+    # Test submission where variance is 0
+    response = await async_client.post("/api/cycle-counts/submit", json={
+        "record_id": "rec-123",
+        "items": [
+            {"sku": "SKU-1", "counted_quantity": 10} # expected is mocked to 10 in our router scaffold
+        ]
+    })
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["status"] == "COMPLETED"
+
+@pytest.mark.asyncio
+async def test_submit_count_variance_flagged(async_client):
+    # Test submission where variance is > threshold (expected is 10)
+    response = await async_client.post("/api/cycle-counts/submit", json={
+        "record_id": "rec-456",
+        "items": [
+            {"sku": "SKU-2", "counted_quantity": 5} # 50% variance, threshold is 5%
+        ]
+    })
+    assert response.status_code == 200
+    assert response.json()["success"] is False
+    assert response.json()["status"] == "RECOUNT_REQUIRED"
+
+@pytest.mark.asyncio
+async def test_offline_sync(async_client):
+    # Test batch sync
+    response = await async_client.post("/api/cycle-counts/sync", json=[
+        {
+            "record_id": "rec-sync-1",
+            "items": [{"sku": "SKU-3", "counted_quantity": 10}]
+        },
+        {
+            "record_id": "rec-sync-2",
+            "items": [{"sku": "SKU-4", "counted_quantity": 12}]
+        }
+    ])
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 2
+    assert response.json()["results"][0]["synced"] is True

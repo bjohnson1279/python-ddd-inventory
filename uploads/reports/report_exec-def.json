@@ -1,0 +1,12 @@
+[
+  {
+    "sku": "MOCK-1",
+    "quantity": 100,
+    "location": "default"
+  },
+  {
+    "sku": "MOCK-2",
+    "quantity": 50,
+    "location": "default"
+  }
+]

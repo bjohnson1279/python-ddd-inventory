@@ -1,6 +1,6 @@
 from typing import List, Dict
 from datetime import datetime
-from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord
+from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord, CycleCountLineItem
 
 RECOMMENDED_FREQUENCY_MAPPING = {'A': 30, 'B': 90, 'C': 180}
 
@@ -45,3 +45,33 @@ class CycleCountScheduler:
                     is_blind_count=True
                 ))
         return generated
+
+class CycleCountExecutionService:
+    def process_submission(self, line_items: List[CycleCountLineItem], variance_threshold_pct: float = 0.05) -> bool:
+        """
+        Process a list of counted line items, calculate variances, and determine if recounts are needed.
+        Returns True if all items match within threshold, False if recounts are required.
+        """
+        requires_recount = False
+        
+        for item in line_items:
+            if item.counted_quantity is None:
+                continue
+                
+            variance = item.counted_quantity - item.expected_quantity
+            item.variance_quantity = variance
+            
+            # Simple threshold check based on percentage of expected
+            # If expected is 0, any non-zero count is 100% variance
+            if item.expected_quantity == 0:
+                pct_variance = 1.0 if variance != 0 else 0.0
+            else:
+                pct_variance = abs(variance) / item.expected_quantity
+                
+            if pct_variance > variance_threshold_pct:
+                item.status = 'VARIANCE_FLAGGED'
+                requires_recount = True
+            else:
+                item.status = 'MATCHED'
+                
+        return not requires_recount

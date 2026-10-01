@@ -24,4 +24,16 @@ class CycleCountRecord:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     plan_id: Optional[str] = None
     zone: Optional[str] = None
+    assigned_operator_id: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
+
+@dataclass
+class CycleCountLineItem:
+    record_id: str
+    sku: str
+    expected_quantity: int
+    counted_quantity: Optional[int] = None
+    variance_quantity: Optional[int] = None
+    variance_value: Optional[float] = None
+    status: str = 'PENDING' # PENDING, MATCHED, VARIANCE_FLAGGED, RECOUNTED
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))

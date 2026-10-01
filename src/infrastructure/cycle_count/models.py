@@ -25,5 +25,18 @@ class CycleCountRecordModel(Base):
     status = Column(String, nullable=False)
     abc_classification = Column(String, nullable=False)
     zone = Column(String, nullable=True)
+    assigned_operator_id = Column(String, nullable=True)
     is_blind_count = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class CycleCountLineItemModel(Base):
+    __tablename__ = 'cycle_count_line_items'
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    record_id = Column(String, nullable=False)
+    sku = Column(String, nullable=False)
+    expected_quantity = Column(Integer, nullable=False)
+    counted_quantity = Column(Integer, nullable=True)
+    variance_quantity = Column(Integer, nullable=True)
+    variance_value = Column(Integer, nullable=True) # or Float
+    status = Column(String, nullable=False, default='PENDING')
