@@ -93,3 +93,8 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** Missing standard HTTP security headers (e.g., Content-Security-Policy, Strict-Transport-Security, X-Frame-Options, X-Content-Type-Options) exposing the application to clickjacking, XSS, and MIME-sniffing attacks.
 **Learning:** Adding a strict Content-Security-Policy header via a global middleware in FastAPI can break the interactive documentation (`/docs`, `/redoc`) and GraphQL IDE (`/graphql`) because they rely on external CDNs or inline scripts that are blocked by `default-src 'self'`.
 **Prevention:** When implementing a global CSP middleware in FastAPI, ensure that paths serving HTML documentation (like `/docs`, `/redoc`, and `/graphql`) are explicitly excluded from strict CSP enforcement (or have a customized, relaxed CSP that allows necessary assets).
+
+## Scope Quarantine, Journaling & Security Test Invariants
+- **Strictly Append-Only Journaling**: When adding learnings to `.jules/*.md`, append strictly at the end of the file. Do not rewrite, deduplicate, or remove lines beginning with `## YYYY-MM-DD`.
+- **Surgical Scope Quarantine**: Modify only the files directly involved in the issue and their corresponding test fixtures. Do not delete, rename, or perform drive-by cleanups of unrelated root-level scripts or legacy files.
+- **Coupled Test Fixture Awareness for Security Invariants**: When changing fail-open fallback behavior (such as hardening decryption to fail closed), always update upstream test mocks that rely on plaintext credentials or mock values.

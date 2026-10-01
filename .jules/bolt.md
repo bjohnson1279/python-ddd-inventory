@@ -117,3 +117,8 @@
 ## 2024-10-01 - O(1) Dictionary Index for RMA Case Lookups
 **Learning:** In `ReverseLogisticsWorkflow`, updating inspection results iterated over the entire `rma_cases` list to find a specific case by its ID. For a large number of RMA cases, this $O(N)$ traversal created a significant performance bottleneck during batch updates.
 **Action:** Introduced an internal dictionary index (`_rma_index`) mapping `case_id` to its corresponding `RMACase` object upon creation. This converts the expensive $O(N)$ list traversal during updates into an $O(1)$ dictionary lookup, dramatically reducing lookup latency.
+
+## Scope Quarantine, Journaling & Security Test Invariants
+- **Strictly Append-Only Journaling**: When adding learnings to `.jules/*.md`, append strictly at the end of the file. Do not rewrite, deduplicate, or remove lines beginning with `## YYYY-MM-DD`.
+- **Surgical Scope Quarantine**: Modify only the files directly involved in the issue and their corresponding test fixtures. Do not delete, rename, or perform drive-by cleanups of unrelated root-level scripts or legacy files.
+- **Coupled Test Fixture Awareness for Security Invariants**: When changing fail-open fallback behavior (such as hardening decryption to fail closed), always update upstream test mocks that rely on plaintext credentials or mock values.
