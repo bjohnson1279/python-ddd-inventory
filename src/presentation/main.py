@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from src.presentation.product.router import router as product_router
 from src.presentation.cycle_count.router import router as cycle_count_router
 from contextlib import asynccontextmanager
@@ -19,6 +19,23 @@ app = FastAPI(title='Python DDD Inventory API', lifespan=lifespan)
 
 # Setup Distributed Tracing & Observability
 setup_telemetry(app)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    # Do not apply strict CSP to FastAPI docs and GraphQL UI
+    if not request.url.path.startswith(("/docs", "/redoc", "/graphql")):
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
+
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
+
+
 
 app.include_router(product_router)
 app.include_router(cycle_count_router)

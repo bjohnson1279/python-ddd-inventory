@@ -88,3 +88,8 @@ Prevention: Validate presence of required infrastructure configuration elements 
 - **Strictly Additive Journal Updates**: When updating `.jules/*.md`, strictly append new dated entries (`## YYYY-MM-DD - Title`). NEVER delete, truncate, or overwrite historical learnings or previous entries.
 - **Substantive Code Diff Requirement**: Pull requests must include substantive code changes in `src/`, `app/`, `lib/`, or `tests/`. Never open PRs that modify only `.jules/*.md` journals or root scratch scripts.
 - **Zero Scratch File Commits**: Never commit `*.diff`, `*.patch`, `test_*.ts`, `test_*.js`, `test.cjs`, `fix_*.php`, or `patch_*.py` files. Always remove temporary debugging or verification scripts prior to committing.
+
+## 2026-10-01 - Add Security Headers Middleware
+**Vulnerability:** Missing standard HTTP security headers (e.g., Content-Security-Policy, Strict-Transport-Security, X-Frame-Options, X-Content-Type-Options) exposing the application to clickjacking, XSS, and MIME-sniffing attacks.
+**Learning:** Adding a strict Content-Security-Policy header via a global middleware in FastAPI can break the interactive documentation (`/docs`, `/redoc`) and GraphQL IDE (`/graphql`) because they rely on external CDNs or inline scripts that are blocked by `default-src 'self'`.
+**Prevention:** When implementing a global CSP middleware in FastAPI, ensure that paths serving HTML documentation (like `/docs`, `/redoc`, and `/graphql`) are explicitly excluded from strict CSP enforcement (or have a customized, relaxed CSP that allows necessary assets).
