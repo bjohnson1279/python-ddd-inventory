@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import uuid
 from typing import Optional
+from decimal import Decimal
 from .value_objects import SKU, Money
 from src.domain.base_entity import AggregateRoot
 
