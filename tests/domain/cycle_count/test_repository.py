@@ -34,6 +34,18 @@ async def test_concrete_subclass():
         async def save_records(self, records: List[CycleCountRecord]) -> List[CycleCountRecord]:
             return records
 
+        async def get_record(self, record_id: str) -> CycleCountRecord:
+            return None
+
+        async def get_assigned_records(self, operator_id: str) -> List[CycleCountRecord]:
+            return []
+
+        async def save_line_items(self, items: list) -> None:
+            pass
+
+        async def get_record_line_items(self, record_id: str) -> list:
+            return []
+
     # Should not raise any errors
     repo = ConcreteRepository()
 
