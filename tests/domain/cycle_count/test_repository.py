@@ -40,10 +40,10 @@ async def test_concrete_subclass():
         async def get_assigned_records(self, operator_id: str) -> List[CycleCountRecord]:
             return []
 
-        async def save_line_items(self, items: list) -> None:
+        async def save_line_items(self, items: List['CycleCountLineItem']) -> None:
             pass
 
-        async def get_record_line_items(self, record_id: str) -> list:
+        async def get_record_line_items(self, record_id: str) -> List['CycleCountLineItem']:
             return []
 
     # Should not raise any errors
