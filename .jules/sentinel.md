@@ -98,3 +98,7 @@ Prevention: Validate presence of required infrastructure configuration elements 
 - **Strictly Append-Only Journaling**: When adding learnings to `.jules/*.md`, append strictly at the end of the file. Do not rewrite, deduplicate, or remove lines beginning with `## YYYY-MM-DD`.
 - **Surgical Scope Quarantine**: Modify only the files directly involved in the issue and their corresponding test fixtures. Do not delete, rename, or perform drive-by cleanups of unrelated root-level scripts or legacy files.
 - **Coupled Test Fixture Awareness for Security Invariants**: When changing fail-open fallback behavior (such as hardening decryption to fail closed), always update upstream test mocks that rely on plaintext credentials or mock values.
+## 2024-10-02 - Path Traversal Vulnerability in Report Router
+**Vulnerability:** The `get_shared_link` endpoint in `src/presentation/report_router.py` used the `token` parameter directly from the route path to construct a file path without any sanitization or validation, allowing an attacker to supply a token like `../../` to access unauthorized files on the server (path traversal).
+**Learning:** Even internal or temporary identifier strings (`token`) must be validated against expected character formats (alphanumeric, hashes) when used to interact with the file system.
+**Prevention:** Use `re.match` to enforce strict formatting on user inputs that are used in file paths or commands, limiting them to safe characters (e.g., `^[a-zA-Z0-9_-]+$`) to prevent directory traversal injections.

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body, Path
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
 import uuid
+import re
 
 # In a real app we'd have DB dependencies and auth dependencies
 # For scaffolding we'll mock them.
@@ -59,6 +60,10 @@ async def schedule_report(id: str = Path(...), payload: Dict[str, Any] = Body(..
 
 @router.get("/shared/{token}")
 async def get_shared_link(token: str = Path(...)):
+    # Validate token to prevent path traversal
+    if not re.match(r'^[a-zA-Z0-9_-]+$', token):
+        raise HTTPException(status_code=400, detail="Invalid token format")
+
     # Mock token lookup
     if token == "expired":
         raise HTTPException(status_code=403, detail="Link expired")
