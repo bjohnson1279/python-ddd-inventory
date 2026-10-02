@@ -17,13 +17,20 @@ class CalculateSalesVelocity:
         seven_days_ago = now - timedelta(days=7)
         thirty_days_ago = now - timedelta(days=30)
         
-        # Filter history in memory for intervals
-        history_30d = [r for r in history if r.get('dispatched_at', now) >= thirty_days_ago]
-        history_7d = [r for r in history_30d if r.get('dispatched_at', now) >= seven_days_ago]
+        # Bolt Optimization: Avoid multiple O(N) list traversals when calculating aggregate metrics.
+        # Combine aggregations into a single O(N) pass to accumulate all values simultaneously.
+        sum_7d = 0
+        sum_30d = 0
+        sum_90d = 0
+        for r in history:
+            qty = r.get('quantity', 0)
+            dispatched_at = r.get('dispatched_at', now)
 
-        sum_7d = sum(r.get('quantity', 0) for r in history_7d)
-        sum_30d = sum(r.get('quantity', 0) for r in history_30d)
-        sum_90d = sum(r.get('quantity', 0) for r in history)
+            sum_90d += qty
+            if dispatched_at >= thirty_days_ago:
+                sum_30d += qty
+                if dispatched_at >= seven_days_ago:
+                    sum_7d += qty
 
         ads_7d = round(sum_7d / 7.0, 3)
         ads_30d = round(sum_30d / 30.0, 3)
