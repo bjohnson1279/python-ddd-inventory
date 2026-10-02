@@ -35,7 +35,7 @@ async def test_concrete_subclass():
             return records
 
         async def get_record(self, record_id: str) -> CycleCountRecord:
-            pass
+            return None
 
         async def get_assigned_records(self, operator_id: str) -> List[CycleCountRecord]:
             return []
