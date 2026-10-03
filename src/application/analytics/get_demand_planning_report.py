@@ -52,14 +52,31 @@ class GetDemandPlanningReport:
                 history_map[sku] = []
             history_map[sku].append(record)
 
+        # Bolt Optimization: Execute velocity calculations concurrently with chunking
+        # Impact: Prevents O(N) blocking network/async delays while avoiding connection pool exhaustion.
+
+        # Ensure inventory_items is a list to safely iterate multiple times
+        inventory_items_list = list(inventory_items)
+        velocities = []
+        chunk_size = 50
+
+        for i in range(0, len(inventory_items_list), chunk_size):
+            chunk = inventory_items_list[i:i + chunk_size]
+            chunk_tasks = []
+            for item in chunk:
+                sku = item.get("sku")
+                current_stock = item.get("quantity", 0)
+                sku_history = history_map.get(sku, [])
+                chunk_tasks.append(
+                    self.calculate_sales_velocity.execute(sku, location_id, current_stock, sku_history)
+                )
+            velocities.extend(await asyncio.gather(*chunk_tasks))
+
         report_items = []
-        for item in inventory_items:
+        for i, item in enumerate(inventory_items_list):
             sku = item.get("sku")
             current_stock = item.get("quantity", 0)
-
-            # Velocity
-            sku_history = history_map.get(sku, [])
-            velocity = await self.calculate_sales_velocity.execute(sku, location_id, current_stock, sku_history)
+            velocity = velocities[i]
 
             # Policy
             policy = policy_map.get(sku, {})
