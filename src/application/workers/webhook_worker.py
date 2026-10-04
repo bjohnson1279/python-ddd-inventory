@@ -54,8 +54,29 @@ class WebhookDeliveryEngine:
 
 
     async def _deliver_webhook(self, client: httpx.AsyncClient, item: Dict[str, Any]):
+        import urllib.parse
+        import socket
+        import ipaddress
+
         payload_str = str(item["payload"])
         signature = self._sign_payload(payload_str)
+
+        # TOCTOU Mitigation: Perform SSRF validation immediately before HTTP request.
+        # While not preventing DNS rebinding within the httpx client itself entirely,
+        # it significantly reduces the race condition window to milliseconds.
+        parsed = urllib.parse.urlparse(item["url"])
+        try:
+            addr_infos = socket.getaddrinfo(parsed.hostname, None)
+            for addr in addr_infos:
+                ip_str = addr[4][0]
+                ip_obj = ipaddress.ip_address(ip_str)
+                if (ip_obj.is_private or ip_obj.is_loopback or
+                    ip_obj.is_link_local or ip_obj.is_unspecified or ip_obj.is_multicast):
+                    logger.error(f"SSRF blocked during delivery for {item['url']}")
+                    return
+        except socket.gaierror:
+            logger.error(f"DNS resolution failed during delivery for {item['url']}")
+            return
 
         try:
             response = await client.post(
