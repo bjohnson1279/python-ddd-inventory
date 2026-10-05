@@ -68,9 +68,19 @@ async def get_assigned_counts(request: Request, db: AsyncSession = Depends(get_d
     repo = SQLAlchemyCycleCountRepository(db)
     records = await repo.get_assigned_records(operator_id)
     
+    # Bolt Optimization: Resolve N+1 query issue
+    # Fetch all line items for all records at once and use O(1) memory lookup
+    record_ids = [r.id for r in records]
+    all_items = await repo.get_records_line_items(record_ids)
+
+    from collections import defaultdict
+    items_by_record = defaultdict(list)
+    for item in all_items:
+        items_by_record[item.record_id].append(item)
+
     response_data = []
     for record in records:
-        items = await repo.get_record_line_items(record.id)
+        items = items_by_record[record.id]
         # Apply Blind Count masking
         item_dtos = []
         for item in items:

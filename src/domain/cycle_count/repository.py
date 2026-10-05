@@ -34,3 +34,7 @@ class CycleCountRepository(ABC):
     @abstractmethod
     async def get_record_line_items(self, record_id: str) -> List['CycleCountLineItem']:
         pass
+
+    @abstractmethod
+    async def get_records_line_items(self, record_ids: List[str]) -> List['CycleCountLineItem']:
+        pass
