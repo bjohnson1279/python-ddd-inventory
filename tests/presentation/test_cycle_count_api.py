@@ -36,10 +36,15 @@ async def test_schedule_audits(async_client):
 
 @pytest.mark.asyncio
 async def test_get_assigned_counts(async_client):
-    # Just checking the endpoint resolves properly without failure
+    # Check endpoint resolves and handles line items correctly
     response = await async_client.get("/api/cycle-counts/assigned")
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    res_json = response.json()
+    assert isinstance(res_json, list)
+    for record_dto in res_json:
+        assert "record_id" in record_dto
+        assert "items" in record_dto
+        assert isinstance(record_dto["items"], list)
 
 @pytest.mark.asyncio
 async def test_submit_count_matched(async_client):

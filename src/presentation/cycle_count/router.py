@@ -68,17 +68,25 @@ async def get_assigned_counts(request: Request, db: AsyncSession = Depends(get_d
     repo = SQLAlchemyCycleCountRepository(db)
     records = await repo.get_assigned_records(operator_id)
     
+    record_ids = [record.id for record in records]
+    all_items = await repo.get_records_line_items(record_ids)
+
+    items_by_record_id = {}
+    for item in all_items:
+        items_by_record_id.setdefault(item.record_id, []).append(item)
+
     response_data = []
     for record in records:
-        items = await repo.get_record_line_items(record.id)
+        items = items_by_record_id.get(record.id, [])
         # Apply Blind Count masking
-        item_dtos = []
-        for item in items:
-            item_dtos.append({
+        item_dtos = [
+            {
                 "sku": item.sku,
                 "expected_quantity": None if record.is_blind_count else item.expected_quantity,
                 "status": item.status
-            })
+            }
+            for item in items
+        ]
             
         response_data.append({
             "record_id": record.id,
