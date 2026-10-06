@@ -43,17 +43,14 @@ class OrderRoutingEngine:
         stock = self.stock_index.get((location_id, sku))
         return stock.available_qty if stock else 0
 
-    def route_order(self, customer_lat: float, customer_lon: float, order_lines: List[OrderLine]) -> Dict[str, List[OrderLine]]:
+    def _get_locations_sorted_by_distance(self, customer_lat: float, customer_lon: float) -> List[Location]:
         """
-        Optimizes splits and location distance. Returns a dictionary mapping
-        location_id to the order lines it should fulfill.
+        Sorts locations by distance to customer coordinates.
+        Bolt Optimization: Avoid expensive math.atan2, math.sqrt, and radius multiplication
+        in the sort key since we only need the monotonically increasing 'a' value for sorting.
+        Precompute customer coordinates outside the loop.
+        Impact: ~50% faster sorting of locations for order routing.
         """
-        routing_plan = {}
-        
-        # Bolt Optimization: Avoid expensive math.atan2, math.sqrt, and radius multiplication
-        # in the sort key since we only need the monotonically increasing 'a' value for sorting.
-        # Precompute customer coordinates outside the loop.
-        # Impact: ~50% faster sorting of locations for order routing.
         cust_lat_rad = math.radians(customer_lat)
         cust_lon_rad = math.radians(customer_lon)
         cust_cos_lat = math.cos(cust_lat_rad)
@@ -67,37 +64,53 @@ class OrderRoutingEngine:
             sin_dLon_2 = math.sin(dLon / 2)
             return (sin_dLat_2 * sin_dLat_2 + cust_cos_lat * math.cos(loc_lat_rad) * sin_dLon_2 * sin_dLon_2)
 
-        # Sort locations by distance to customer
-        sorted_locations = sorted(
-            self.locations.values(),
-            key=fast_sort_key
-        )
+        return sorted(self.locations.values(), key=fast_sort_key)
+
+    def _allocate_stock_for_line(
+        self,
+        line: OrderLine,
+        sorted_locations: List[Location],
+        routing_plan: Dict[str, List[OrderLine]],
+    ) -> None:
+        """
+        Fulfills order line quantity across sorted locations, updating stock and routing plan.
+        Raises ValueError if stock across all locations is insufficient.
+        """
+        remaining_qty = line.quantity
+
+        for loc in sorted_locations:
+            if remaining_qty <= 0:
+                break
+
+            available = self._get_available_qty(loc.id, line.sku)
+            if available > 0:
+                allocate = min(available, remaining_qty)
+
+                if loc.id not in routing_plan:
+                    routing_plan[loc.id] = []
+
+                routing_plan[loc.id].append(OrderLine(sku=line.sku, quantity=allocate))
+
+                # Deduct from internal stock levels (O(1) update)
+                stock = self.stock_index.get((loc.id, line.sku))
+                if stock:
+                    stock.available_qty -= allocate
+
+                remaining_qty -= allocate
+
+        if remaining_qty > 0:
+            # In a real system, this would trigger backorders or drop-shipping workflows
+            raise ValueError(f"Insufficient stock across all locations to fulfill SKU {line.sku}")
+
+    def route_order(self, customer_lat: float, customer_lon: float, order_lines: List[OrderLine]) -> Dict[str, List[OrderLine]]:
+        """
+        Optimizes splits and location distance. Returns a dictionary mapping
+        location_id to the order lines it should fulfill.
+        """
+        routing_plan = {}
+        sorted_locations = self._get_locations_sorted_by_distance(customer_lat, customer_lon)
 
         for line in order_lines:
-            remaining_qty = line.quantity
-            
-            for loc in sorted_locations:
-                if remaining_qty <= 0:
-                    break
-                    
-                available = self._get_available_qty(loc.id, line.sku)
-                if available > 0:
-                    allocate = min(available, remaining_qty)
-                    
-                    if loc.id not in routing_plan:
-                        routing_plan[loc.id] = []
-                    
-                    routing_plan[loc.id].append(OrderLine(sku=line.sku, quantity=allocate))
-                    
-                    # Deduct from internal stock levels (O(1) update)
-                    stock = self.stock_index.get((loc.id, line.sku))
-                    if stock:
-                        stock.available_qty -= allocate
-                            
-                    remaining_qty -= allocate
-                    
-            if remaining_qty > 0:
-                # In a real system, this would trigger backorders or drop-shipping workflows
-                raise ValueError(f"Insufficient stock across all locations to fulfill SKU {line.sku}")
+            self._allocate_stock_for_line(line, sorted_locations, routing_plan)
 
         return routing_plan
