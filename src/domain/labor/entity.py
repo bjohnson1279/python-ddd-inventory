@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
-from datetime import date, datetime
+from datetime import date
 
 class ScheduleStatus(Enum):
     DRAFT = "DRAFT"
