@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, Header, Depends
-from typing import Optional
+from typing import Optional, Tuple
 import logging
 import json
 
@@ -21,6 +21,37 @@ def get_channel_ingestion_service():
             pass
     return ChannelIngestionService(inventory_repository=None, dispatch_use_case=MockDispatchUseCase())
 
+def _parse_json_payload(body_str: str) -> dict:
+    try:
+        return json.loads(body_str)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+def _verify_sns_signature(payload: dict, body_str: str, security: AmazonNotificationSecurity) -> None:
+    signature = payload.get("Signature")
+    if not signature or not security.validate_sns_signature(body_str, signature):
+        raise HTTPException(status_code=401, detail="Invalid SNS signature")
+
+def _parse_order_change_notification(payload: dict) -> Optional[Tuple[str, list]]:
+    message_str = payload.get("Message", "{}")
+    try:
+        message = json.loads(message_str)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid Message payload")
+
+    notification_type = message.get("NotificationType")
+    if notification_type != "ORDER_CHANGE":
+        return None
+
+    order_details = message.get("Payload", {}).get("OrderChangeNotification", {})
+    external_order_id = order_details.get("AmazonOrderId")
+
+    if not external_order_id:
+        raise HTTPException(status_code=400, detail="Missing AmazonOrderId")
+
+    line_items = order_details.get("OrderItems", [])
+    return external_order_id, line_items
+
 @router.post("/sns/notifications")
 async def handle_amazon_notification(
     request: Request,
@@ -33,11 +64,7 @@ async def handle_amazon_notification(
 
     raw_body = await request.body()
     body_str = raw_body.decode('utf-8')
-    
-    try:
-        payload = json.loads(body_str)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    payload = _parse_json_payload(body_str)
 
     if x_amz_sns_message_type == "SubscriptionConfirmation":
         # Handle SNS Subscription Confirmation
@@ -46,32 +73,14 @@ async def handle_amazon_notification(
         return {"status": "Subscription confirmed manually"}
 
     if x_amz_sns_message_type == "Notification":
-        signature = payload.get("Signature")
-        if not signature or not security.validate_sns_signature(body_str, signature):
-            raise HTTPException(status_code=401, detail="Invalid SNS signature")
+        _verify_sns_signature(payload, body_str, security)
 
-        # Parse Amazon SP-API Order Change Notification
-        message_str = payload.get("Message", "{}")
-        try:
-            message = json.loads(message_str)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid Message payload")
-
-        notification_type = message.get("NotificationType")
-        if notification_type != "ORDER_CHANGE":
+        parsed_order = _parse_order_change_notification(payload)
+        if parsed_order is None:
             return {"status": "Ignored non-order notification"}
-            
-        order_details = message.get("Payload", {}).get("OrderChangeNotification", {})
-        external_order_id = order_details.get("AmazonOrderId")
-        
-        # Amazon SP-API typically requires a separate API call to fetch line items for the order
-        # For simplicity in this scaffold, we'll assume line items are provided or fetched here
-        line_items = order_details.get("OrderItems", [])
 
-        if not external_order_id:
-            raise HTTPException(status_code=400, detail="Missing AmazonOrderId")
-
-        tenant_id = "default_tenant" 
+        external_order_id, line_items = parsed_order
+        tenant_id = "default_tenant"
 
         try:
             await ingestion_service.ingest_order(
@@ -84,5 +93,5 @@ async def handle_amazon_notification(
         except Exception as e:
             logger.error(f"Error processing Amazon webhook: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
-    
+
     return {"status": "Unhandled message type"}
