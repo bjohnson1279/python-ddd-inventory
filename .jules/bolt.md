@@ -132,3 +132,7 @@
 ## 2024-10-05 - Bulk SQL IN-clause query for cycle count line items
 **Learning:** Calling repository single-record fetch methods in a loop when building endpoint response data causes an N+1 SQL query bottleneck. For 100 records, executing 101 queries incurred ~156 ms in sequential query round-trips.
 **Action:** Add bulk fetch repository methods using SQLAlchemy's `.in_()` operator to fetch all related entities in a single query and group them in-memory, converting N+1 database queries into a single batch query.
+
+## 2024-10-07 - O(1) Dictionary Index for Notification Lookups
+**Learning:** In NotificationInboxService, looking up a notification by ID iterated over the entire notifications list. This O(N) traversal creates a bottleneck for users with many notifications. Using an internal dictionary index mapping (notif_id, user_id) to the Notification object converts this to an O(1) lookup.
+**Action:** Always maintain an internal dictionary index for collections that require frequent individual lookups by ID, especially in in-memory services.
