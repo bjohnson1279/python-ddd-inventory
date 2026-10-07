@@ -47,8 +47,8 @@ def test_calculate_aging_buckets_selects_latest_positive_receipt(aging_service):
     current_date = datetime(2025, 1, 15, 12, 0, tzinfo=timezone.utc)
     entries = [
         {"quantity": 10, "occurred_at": current_date - timedelta(days=100)},
-        {"quantity": 5, "occurred_at": current_date - timedelta(days=20)},
         {"quantity": 15, "occurred_at": current_date - timedelta(days=50)},
+        {"quantity": 5, "occurred_at": current_date - timedelta(days=20)},
         {"quantity": -2, "occurred_at": current_date - timedelta(days=5)},
     ]
     result = aging_service.calculate_aging_buckets(
