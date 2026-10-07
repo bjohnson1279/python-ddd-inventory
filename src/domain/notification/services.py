@@ -55,12 +55,10 @@ class NotificationDispatcherService:
 class NotificationInboxService:
     def __init__(self, notifications: List[Notification]):
         self.notifications = notifications
+        self._index = {(n.id, n.user_id): n for n in notifications}
 
     def _get(self, notif_id: str, user_id: str) -> Optional[Notification]:
-        for n in self.notifications:
-            if n.id == notif_id and n.user_id == user_id:
-                return n
-        return None
+        return self._index.get((notif_id, user_id))
 
     def mark_as_read(self, notif_id: str, user_id: str) -> bool:
         n = self._get(notif_id, user_id)
@@ -94,6 +92,7 @@ class NotificationInboxService:
             metadata=n.metadata
         )
         self.notifications.append(escalated_notif)
+        self._index[(escalated_notif.id, escalated_notif.user_id)] = escalated_notif
         return escalated_notif
 
     def get_unread_count(self, user_id: str) -> int:
