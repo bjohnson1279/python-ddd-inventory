@@ -88,3 +88,13 @@ def test_webhook_success():
     assert response.json() == {"status": "Webhook processed"}
     # mock_ingestion_instance.ingest_order was a function so we can't easily assert_called_once_with without wrapping in a Mock or AsyncMock
     # let's just assume it passed since 200 is returned.
+
+def test_get_webhook_security_env_var(monkeypatch):
+    monkeypatch.setenv("SHOPIFY_API_SECRET", "test_env_secret")
+    security = get_webhook_security()
+    assert security.api_secret == b"test_env_secret"
+
+def test_get_webhook_security_default_empty(monkeypatch):
+    monkeypatch.delenv("SHOPIFY_API_SECRET", raising=False)
+    security = get_webhook_security()
+    assert security.api_secret == b""

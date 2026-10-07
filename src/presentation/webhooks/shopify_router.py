@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Request, HTTPException, Header, Depends
 from typing import Optional
 import logging
@@ -11,8 +12,8 @@ router = APIRouter(prefix="/webhooks/shopify", tags=["webhooks", "shopify"])
 
 # In a real app, these would be injected via dependencies
 def get_webhook_security():
-    # Example secret, would come from config/env
-    return ShopifyWebhookSecurity(api_secret="your_shopify_api_secret")
+    api_secret = os.getenv("SHOPIFY_API_SECRET", "")
+    return ShopifyWebhookSecurity(api_secret=api_secret)
 
 def get_channel_ingestion_service():
     # Example mock dependency injection
