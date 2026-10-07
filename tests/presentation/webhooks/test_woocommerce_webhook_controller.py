@@ -1,11 +1,17 @@
+import os
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.presentation.main import app
 from src.presentation.webhooks.woocommerce_router import get_woocommerce_security, get_channel_ingestion_service
 
 client = TestClient(app)
+
+def test_get_woocommerce_security_uses_env_var():
+    with patch.dict(os.environ, {"WOOCOMMERCE_API_SECRET": "test_secret_123"}):
+        sec = get_woocommerce_security()
+        assert sec.api_secret == b"test_secret_123"
 
 def test_woocommerce_webhook_missing_hmac():
     response = client.post(

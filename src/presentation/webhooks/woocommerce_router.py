@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException, Header, Depends
 from typing import Optional
 import logging
+import os
 
 from src.infrastructure.woocommerce.woocommerce_webhook_security import WooCommerceWebhookSecurity
 from src.application.integrations.channel_ingestion_service import ChannelIngestionService
@@ -11,7 +12,8 @@ router = APIRouter(prefix="/webhooks/woocommerce", tags=["webhooks", "woocommerc
 
 # Dependencies
 def get_woocommerce_security():
-    return WooCommerceWebhookSecurity(api_secret="your_woocommerce_secret")
+    api_secret = os.getenv("WOOCOMMERCE_API_SECRET", "")
+    return WooCommerceWebhookSecurity(api_secret=api_secret)
 
 def get_channel_ingestion_service():
     from src.application.integrations.channel_ingestion_service import ChannelIngestionService

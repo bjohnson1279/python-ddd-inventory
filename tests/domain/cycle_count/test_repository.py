@@ -1,7 +1,7 @@
 import pytest
-from typing import List
+from typing import Dict, List
 from src.domain.cycle_count.repository import CycleCountRepository
-from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord
+from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord, CycleCountLineItem
 
 def test_cannot_instantiate_abc():
     """Test that CycleCountRepository cannot be instantiated directly."""
@@ -46,6 +46,9 @@ async def test_concrete_subclass():
         async def get_record_line_items(self, record_id: str) -> List['CycleCountLineItem']:
             return []
 
+        async def get_line_items_by_record_ids(self, record_ids: List[str]) -> Dict[str, List['CycleCountLineItem']]:
+            return {rid: [] for rid in record_ids}
+
     # Should not raise any errors
     repo = ConcreteRepository()
 
@@ -58,3 +61,5 @@ async def test_concrete_subclass():
     assert await repo.save_record(record) == record
 
     assert await repo.save_records([record]) == [record]
+
+    assert await repo.get_line_items_by_record_ids(["rec-1", "rec-2"]) == {"rec-1": [], "rec-2": []}
