@@ -1,4 +1,5 @@
 from typing import Any, List, Dict
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,14 +22,24 @@ class ChannelIngestionService:
                 qty = item.get("quantity", 1)
                 sku_quantities[sku] = sku_quantities.get(sku, 0) + qty
 
-        for sku, quantity in sku_quantities.items():
-            # In a real implementation we would check ChannelAllocationPools here
-            # to resolve oversell conflicts before dispatching.
-            
-            # Dispatch stock, skipping publisher back to the origin channel
-            await self.dispatch_use_case.execute(
-                sku=sku, 
-                quantity=quantity, 
-                tenant_id=tenant_id,
-                skip_publish_to_channel=channel_id
-            )
+        execute_batch = getattr(self.dispatch_use_case, 'execute_batch', None)
+        if callable(execute_batch):
+            items = [{"sku": sku, "quantity": qty} for sku, qty in sku_quantities.items()]
+            if items:
+                await execute_batch(
+                    items=items,
+                    tenant_id=tenant_id,
+                    skip_publish_to_channel=channel_id
+                )
+        else:
+            tasks = [
+                self.dispatch_use_case.execute(
+                    sku=sku,
+                    quantity=quantity,
+                    tenant_id=tenant_id,
+                    skip_publish_to_channel=channel_id
+                )
+                for sku, quantity in sku_quantities.items()
+            ]
+            if tasks:
+                await asyncio.gather(*tasks)
