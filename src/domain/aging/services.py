@@ -16,11 +16,10 @@ class InventoryAgingService:
         For now, we'll do a simplified calculation based on the last positive entry.
         """
         last_receipt_date = None
-        for entry in ledger_entries:
+        for entry in reversed(ledger_entries):
             if entry.get("quantity", 0) > 0:
-                entry_date = entry["occurred_at"]
-                if not last_receipt_date or entry_date > last_receipt_date:
-                    last_receipt_date = entry_date
+                last_receipt_date = entry["occurred_at"]
+                break
         
         days_old = 0
         if last_receipt_date:
