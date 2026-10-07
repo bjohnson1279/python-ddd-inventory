@@ -1,4 +1,3 @@
-from typing import Any
 import logging
 
 from src.infrastructure.shopify.shopify_client import ShopifyClient
