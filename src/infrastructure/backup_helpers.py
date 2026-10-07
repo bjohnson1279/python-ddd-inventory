@@ -32,7 +32,6 @@ class DatabaseBackupHelper:
         try:
             with open(filepath, "wb" if compress else "w") as out:
                 if compress:
-                    import gzip
                     # pipe pg_dump to gzip
                     p1 = subprocess.Popen(cmd, stdout=subprocess.PIPE)
                     p2 = subprocess.Popen(["gzip"], stdin=p1.stdout, stdout=out)
