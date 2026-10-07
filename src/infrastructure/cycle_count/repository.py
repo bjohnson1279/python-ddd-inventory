@@ -1,5 +1,4 @@
-from typing import List
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Dict, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord, CycleCountLineItem
@@ -136,3 +135,22 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
             ) for m in models
         ]
 
+    async def get_line_items_by_record_ids(self, record_ids: List[str]) -> Dict[str, List['CycleCountLineItem']]:
+        if not record_ids:
+            return {}
+        stmt = select(CycleCountLineItemModel).where(CycleCountLineItemModel.record_id.in_(record_ids))
+        result = await self.session.execute(stmt)
+        models = result.scalars().all()
+        items_by_record: Dict[str, List[CycleCountLineItem]] = {rid: [] for rid in record_ids}
+        for m in models:
+            item = CycleCountLineItem(
+                id=m.id, record_id=m.record_id, sku=m.sku,
+                expected_quantity=m.expected_quantity, counted_quantity=m.counted_quantity,
+                variance_quantity=m.variance_quantity, variance_value=m.variance_value,
+                status=m.status
+            )
+            if m.record_id in items_by_record:
+                items_by_record[m.record_id].append(item)
+            else:
+                items_by_record[m.record_id] = [item]
+        return items_by_record

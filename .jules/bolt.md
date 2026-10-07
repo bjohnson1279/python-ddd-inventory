@@ -128,3 +128,7 @@
 ## 2024-10-04 - Concurrent async execution requires safety constraints (Chunking)
 **Learning:** Using `asyncio.gather(*tasks)` in a loop across a potentially large collection (e.g., thousands of inventory items) to solve an N+1 async wait can introduce unconstrained concurrency, which may overwhelm downstream services or connection pools. Also, if the source iterable is a generator or iterator, reading from it multiple times will fail silently with an empty sequence on the second pass.
 **Action:** When replacing a sequential `await` loop with `asyncio.gather()`, ensure the iterable is materialized (e.g., cast to `list()`) if it needs to be reused. Furthermore, always implement concurrency limits, such as iterating through the list in bounded chunks (e.g., chunk size of 50) and calling `asyncio.gather()` per chunk, rather than gathering all elements simultaneously.
+
+## 2024-10-05 - Bulk SQL IN-clause query for cycle count line items
+**Learning:** Calling repository single-record fetch methods in a loop when building endpoint response data causes an N+1 SQL query bottleneck. For 100 records, executing 101 queries incurred ~156 ms in sequential query round-trips.
+**Action:** Add bulk fetch repository methods using SQLAlchemy's `.in_()` operator to fetch all related entities in a single query and group them in-memory, converting N+1 database queries into a single batch query.
