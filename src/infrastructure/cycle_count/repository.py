@@ -45,6 +45,7 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
             ) for m in models
         ]
 
+
     async def save_record(self, record: CycleCountRecord) -> CycleCountRecord:
         model = CycleCountRecordModel(
             id=record.id,
@@ -108,6 +109,7 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
             ) for m in models
         ]
 
+
     from src.domain.cycle_count.entity import CycleCountLineItem
     from src.infrastructure.cycle_count.models import CycleCountLineItemModel
 
@@ -136,3 +138,17 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
             ) for m in models
         ]
 
+    async def get_records_line_items(self, record_ids: List[str]) -> List['CycleCountLineItem']:
+        if not record_ids:
+            return []
+        stmt = select(CycleCountLineItemModel).where(CycleCountLineItemModel.record_id.in_(record_ids))
+        result = await self.session.execute(stmt)
+        models = result.scalars().all()
+        return [
+            CycleCountLineItem(
+                id=m.id, record_id=m.record_id, sku=m.sku,
+                expected_quantity=m.expected_quantity, counted_quantity=m.counted_quantity,
+                variance_quantity=m.variance_quantity, variance_value=m.variance_value,
+                status=m.status
+            ) for m in models
+        ]
