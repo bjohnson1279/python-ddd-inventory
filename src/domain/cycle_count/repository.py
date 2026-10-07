@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import Dict, List
 from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord, CycleCountLineItem
 
 class CycleCountRepository(ABC):
@@ -33,4 +33,8 @@ class CycleCountRepository(ABC):
 
     @abstractmethod
     async def get_record_line_items(self, record_id: str) -> List['CycleCountLineItem']:
+        pass
+
+    @abstractmethod
+    async def get_line_items_by_record_ids(self, record_ids: List[str]) -> Dict[str, List['CycleCountLineItem']]:
         pass
