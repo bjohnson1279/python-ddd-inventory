@@ -1,3 +1,4 @@
+import re
 import os
 import csv
 import json
@@ -14,6 +15,10 @@ class ReportGeneratorService:
         os.makedirs(f".{self.upload_dir}", exist_ok=True)
 
     async def generate_report(self, report_definition_id: str, execution_id: str, format_str: str) -> str:
+        # Prevent Path Traversal by strictly validating the format_str
+        if not re.match(r'^[a-zA-Z0-9]+$', format_str):
+            raise ValueError("Invalid format string")
+
         # Mock definition fetch
         # def = await db.fetch("SELECT * FROM report_definitions WHERE id = ?", report_definition_id)
         
