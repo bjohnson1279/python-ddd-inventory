@@ -149,3 +149,6 @@
 - **Strict PSR-4 Isolation in PHP**: In PHP codebases, place every class, interface, and enum in its own file named `<ClassName>.php` matching its namespace path. Never combine multiple domain classes into a single file.
 - **Domain Contract Verification**: Always inspect entity and aggregate root definitions to verify exact method and property names before writing service logic or test fixtures.
 - **Clean Markdown Formatting**: Always append journal entries using actual newline characters, never literal string escape sequences.
+## 2024-10-07 - O(1) Dictionary Index for Notification Unread Counts
+**Learning:** In NotificationInboxService, counting unread notifications used `sum(1 for n in ...)` with a list comprehension, which required an O(N) traversal over the entire list for every check. This is inefficient for users with many notifications.
+**Action:** Changed the implementation to maintain an O(1) dictionary index `_unread_counts` mapping `user_id` to their unread notification count, updating it incrementally during notifications changes (add/read).
