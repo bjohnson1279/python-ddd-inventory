@@ -1,15 +1,18 @@
-from fastapi import APIRouter, HTTPException, Body, Path
+from fastapi import APIRouter, HTTPException, Body, Path, Request
 from typing import Dict, Any
 from datetime import datetime, timedelta
 import uuid
 import re
+
+from src.infrastructure.auth.rbac import requires_roles
 
 # In a real app we'd have DB dependencies and auth dependencies
 # For scaffolding we'll mock them.
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 @router.post("/")
-async def create_report(payload: Dict[str, Any] = Body(...)):
+@requires_roles(['ADMIN', 'MANAGER'])
+async def create_report(request: Request, payload: Dict[str, Any] = Body(...)):
     """Creates a new report definition."""
     tenant_id = payload.get("tenant_id", "tenant-1")
     report = {
@@ -26,12 +29,14 @@ async def create_report(payload: Dict[str, Any] = Body(...)):
     return {"success": True, "report": report}
 
 @router.get("/")
-async def list_reports():
+@requires_roles(['ADMIN', 'MANAGER', 'USER'])
+async def list_reports(request: Request):
     """List report definitions for the tenant."""
     return {"reports": []}
 
 @router.post("/{id}/execute")
-async def execute_report(id: str = Path(...), payload: Dict[str, Any] = Body(...)):
+@requires_roles(['ADMIN', 'MANAGER'])
+async def execute_report(request: Request, id: str = Path(...), payload: Dict[str, Any] = Body(...)):
     format_str = payload.get("format", "csv")
     execution_id = str(uuid.uuid4())
     
@@ -45,7 +50,8 @@ async def execute_report(id: str = Path(...), payload: Dict[str, Any] = Body(...
     }
 
 @router.post("/{id}/schedule")
-async def schedule_report(id: str = Path(...), payload: Dict[str, Any] = Body(...)):
+@requires_roles(['ADMIN', 'MANAGER'])
+async def schedule_report(request: Request, id: str = Path(...), payload: Dict[str, Any] = Body(...)):
     cron = payload.get("cronExpression")
     delivery_method = payload.get("deliveryMethod", "INTERNAL")
     

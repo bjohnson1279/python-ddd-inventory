@@ -127,3 +127,7 @@ Prevention: Validate presence of required infrastructure configuration elements 
 - **Strict PSR-4 Isolation in PHP**: In PHP codebases, place every class, interface, and enum in its own file named `<ClassName>.php` matching its namespace path. Never combine multiple domain classes into a single file.
 - **Domain Contract Verification**: Always inspect entity and aggregate root definitions to verify exact method and property names before writing service logic or test fixtures.
 - **Clean Markdown Formatting**: Always append journal entries using actual newline characters, never literal string escape sequences.
+## 2025-02-18 - Fix missing authorization checks in FastAPI router
+**Vulnerability:** The endpoints in `src/presentation/report_router.py` lacked proper RBAC authorization decorators, potentially allowing any authenticated user to create, list, and schedule reports regardless of their roles.
+**Learning:** In FastAPI, custom route decorators that read data from the `request.state` (like RBAC role extractors) require the `request: Request` parameter to be explicitly present in the endpoint function signature; otherwise, they may throw TypeErrors when the router attempts to map dependencies.
+**Prevention:** Ensure that all sensitive endpoints not only apply the `@requires_roles` decorator but also explicitly declare `request: Request` in their method signatures.
