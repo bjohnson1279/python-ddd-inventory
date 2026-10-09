@@ -56,21 +56,34 @@ class NotificationInboxService:
     def __init__(self, notifications: List[Notification]):
         self.notifications = notifications
         self._index = {(n.id, n.user_id): n for n in notifications}
+        # Bolt Optimization: Maintain O(1) index for unread notification counts per user
+        # Impact: Avoids O(N) list traversal over potentially millions of notifications for every unread count request
+        self._unread_counts = {}
+        for n in notifications:
+            if n.status == NotificationStatus.UNREAD:
+                self._unread_counts[n.user_id] = self._unread_counts.get(n.user_id, 0) + 1
 
     def _get(self, notif_id: str, user_id: str) -> Optional[Notification]:
         return self._index.get((notif_id, user_id))
 
     def mark_as_read(self, notif_id: str, user_id: str) -> bool:
         n = self._get(notif_id, user_id)
-        if not n:
-            return False
+        if not n or n.status != NotificationStatus.UNREAD:
+            if not n:
+                return False
+            n.mark_as_read()
+            return True
+
         n.mark_as_read()
+        self._unread_counts[user_id] = max(0, self._unread_counts.get(user_id, 0) - 1)
         return True
 
     def snooze(self, notif_id: str, user_id: str, hours: int) -> bool:
         n = self._get(notif_id, user_id)
         if not n:
             return False
+        if n.status == NotificationStatus.UNREAD:
+             self._unread_counts[user_id] = max(0, self._unread_counts.get(user_id, 0) - 1)
         n.snooze(datetime.now(timezone.utc) + timedelta(hours=hours))
         return True
 
@@ -79,6 +92,8 @@ class NotificationInboxService:
         if not n:
             return None
         
+        if n.status == NotificationStatus.UNREAD:
+            self._unread_counts[user_id] = max(0, self._unread_counts.get(user_id, 0) - 1)
         n.escalate()
         
         # Create a new notification for the manager
@@ -93,7 +108,8 @@ class NotificationInboxService:
         )
         self.notifications.append(escalated_notif)
         self._index[(escalated_notif.id, escalated_notif.user_id)] = escalated_notif
+        self._unread_counts[target_manager_id] = self._unread_counts.get(target_manager_id, 0) + 1
         return escalated_notif
 
     def get_unread_count(self, user_id: str) -> int:
-        return sum(1 for n in self.notifications if n.user_id == user_id and n.status == NotificationStatus.UNREAD)
+        return self._unread_counts.get(user_id, 0)
