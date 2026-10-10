@@ -131,3 +131,8 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** The endpoints in `src/presentation/report_router.py` lacked proper RBAC authorization decorators, potentially allowing any authenticated user to create, list, and schedule reports regardless of their roles.
 **Learning:** In FastAPI, custom route decorators that read data from the `request.state` (like RBAC role extractors) require the `request: Request` parameter to be explicitly present in the endpoint function signature; otherwise, they may throw TypeErrors when the router attempts to map dependencies.
 **Prevention:** Ensure that all sensitive endpoints not only apply the `@requires_roles` decorator but also explicitly declare `request: Request` in their method signatures.
+
+## 2026-10-09 - Fix Missing Authorization in FastAPI Notification Router
+**Vulnerability:** The notification endpoints in `src/presentation/notification/router.py` were entirely missing authorization checks (`@requires_roles`), exposing sensitive functionality to unauthenticated users.
+**Learning:** In FastAPI, it is critical to explicitly apply Role-Based Access Control (RBAC) decorators to all sensitive endpoints, along with adding `request: Request` in the endpoint function signature so that custom route decorators can properly extract roles from the request state.
+**Prevention:** Always verify that every new API router or endpoint dealing with sensitive operations or data explicitly implements `@requires_roles` and includes the `request: Request` parameter in its signature.
