@@ -34,3 +34,8 @@ async def test_generate_report_json(service):
         
     assert len(data) == 2
     assert data[1]["sku"] == "MOCK-2"
+
+@pytest.mark.asyncio
+async def test_generate_report_path_traversal(service):
+    with pytest.raises(ValueError, match="Invalid format string: path traversal detected"):
+        await service.generate_report("def-123", "exec-abc", "../../etc/passwd")

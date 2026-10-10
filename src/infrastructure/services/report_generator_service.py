@@ -15,6 +15,8 @@ class ReportGeneratorService:
         os.makedirs(f".{self.upload_dir}", exist_ok=True)
 
     async def generate_report(self, report_definition_id: str, execution_id: str, format_str: str) -> str:
+        if not format_str.isalnum():
+            raise ValueError("Invalid format string: path traversal detected")
         # Mock definition fetch
         # def = await db.fetch("SELECT * FROM report_definitions WHERE id = ?", report_definition_id)
         
