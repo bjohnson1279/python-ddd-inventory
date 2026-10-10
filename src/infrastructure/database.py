@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import text
-from fastapi import Header
+from fastapi import Header, Request, HTTPException, status
 import os
 
 # Security: Do not add fallback default credentials here to prevent hardcoded secrets
@@ -14,14 +14,25 @@ async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False
 
 Base = declarative_base()
 
-async def get_db_session(x_tenant_id: str = Header(default=None)):
+async def get_db_session(request: Request, x_tenant_id: str = Header(default=None)):
+    # Mitigate Tenant Authorization Bypass (IDOR)
+    user_tenant = getattr(request.state, "tenant_id", None)
+
+    if x_tenant_id and user_tenant and x_tenant_id != user_tenant:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant ID mismatch: You are not authorized to access this tenant's data."
+        )
+
+    active_tenant = x_tenant_id or user_tenant
+
     # Implement Dynamic Multi-Database Tenant Provisioning (SaaS) via schema partitioning
     options = {}
-    if x_tenant_id:
-        options["schema_translate_map"] = {None: f"tenant_{x_tenant_id}"}
+    if active_tenant:
+        options["schema_translate_map"] = {None: f"tenant_{active_tenant}"}
         
     async with async_session(**({"execution_options": options} if options else {})) as session:
-        if x_tenant_id:
+        if active_tenant:
             # Enforce Row-Level Security via Postgres session configuration for shared tables
-            await session.execute(text("SELECT set_config('rls.tenant_id', :tenant, false)"), {"tenant": x_tenant_id})
+            await session.execute(text("SELECT set_config('rls.tenant_id', :tenant, false)"), {"tenant": active_tenant})
         yield session
