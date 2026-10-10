@@ -4,6 +4,18 @@ from src.presentation.main import app
 
 client = TestClient(app)
 
+import pytest
+from unittest.mock import patch
+from fastapi.testclient import TestClient
+from src.presentation.main import app
+
+client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def mock_roles():
+    with patch('src.infrastructure.auth.rbac.get_current_user_roles', return_value=['USER']):
+        yield
+
 def test_get_unread_count():
     response = client.get("/api/notifications/inbox/unread?user_id=u1")
     assert response.status_code == 200
