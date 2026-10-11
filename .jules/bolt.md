@@ -152,3 +152,6 @@
 ## 2024-10-07 - O(1) Dictionary Index for Notification Unread Counts
 **Learning:** In NotificationInboxService, counting unread notifications used `sum(1 for n in ...)` with a list comprehension, which required an O(N) traversal over the entire list for every check. This is inefficient for users with many notifications.
 **Action:** Changed the implementation to maintain an O(1) dictionary index `_unread_counts` mapping `user_id` to their unread notification count, updating it incrementally during notifications changes (add/read).
+## 2024-05-18 - Binary Search for Chronological Ledger Replay
+**Learning:** Reconstructing state from an event-sourced ledger requires filtering events up to a point in time. A linear scan is O(N), but since ledger events are inherently appended chronologically, using binary search (`bisect`) reduces this to O(log N).
+**Action:** Use binary search for filtering time-series or append-only chronologically ordered lists instead of list comprehensions.
