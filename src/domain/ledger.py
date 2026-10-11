@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 import uuid
+import bisect
 
 @dataclass
 class LedgerEntry:
@@ -74,10 +75,10 @@ class ComplianceLedger:
         to project the exact state of the aggregate at that point in time.
         """
         events = self._aggregate_index.get(aggregate_id, [])
-        return [
-            e for e in events
-            if e.timestamp <= point_in_time
-        ]
+        # Bolt Optimization: Use binary search (O(log N)) instead of linear scan (O(N))
+        # to find the cutoff point for state reconstruction in a chronologically ordered ledger.
+        idx = bisect.bisect_right(events, point_in_time, key=lambda e: e.timestamp)
+        return events[:idx]
 
     def verify_ledger_integrity(self) -> bool:
         """Verifies the cryptographic chain of hashes to detect tampering."""
