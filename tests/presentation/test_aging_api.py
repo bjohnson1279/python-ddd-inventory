@@ -1,10 +1,6 @@
 import pytest
-from fastapi.testclient import TestClient
-from src.presentation.main import app
 
-client = TestClient(app)
-
-def test_analyze_sku_aging():
+def test_analyze_sku_aging(client):
     response = client.get("/api/aging/SKU1?location_id=L1&tenant_id=T1")
     assert response.status_code == 200
     data = response.json()

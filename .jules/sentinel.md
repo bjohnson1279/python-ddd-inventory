@@ -145,3 +145,7 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** Report router endpoints (`create`, `list`, `execute`, `schedule`) in `src/presentation/report_router.py` were missing `@requires_roles` authorization guards, risking unauthenticated report execution.
 **Learning:** Role extraction middleware requires `request: Request` to be present in endpoint signatures for decorators to access `request.state`.
 **Prevention:** Always pair `@requires_roles` decorators with `request: Request` parameters and ensure corresponding test suites mock `get_current_user_roles`.
+## 2026-10-10 - Fix Missing Authorization in Aging API
+**Vulnerability:** The `analyze_sku_aging` endpoint in `src/presentation/aging/router.py` was missing `@requires_roles` authorization guards, allowing unauthenticated or unauthorized users to access potentially sensitive aging and esg analysis.
+**Learning:** Role extraction middleware decorators like `@requires_roles` require `request: Request` to be present in the endpoint signatures in order to properly access `request.state`. Also, these endpoint functions must be explicitly declared as `async def` to support the decorator's asynchronous execution.
+**Prevention:** Always pair `@requires_roles` decorators with `request: Request` parameters on API endpoints and ensure the function is defined as `async def` when dealing with sensitive operations or data.

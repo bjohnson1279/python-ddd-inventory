@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import Dict, Any
 from datetime import datetime, timezone
 from src.domain.aging.services import InventoryAgingService, DeadStockRecommendationEngine, EsgEmissionsCalculator
+from src.infrastructure.auth.rbac import requires_roles
 
 router = APIRouter(prefix="/api/aging", tags=["aging"])
 
@@ -10,7 +11,8 @@ recommendation_engine = DeadStockRecommendationEngine()
 esg_calc = EsgEmissionsCalculator()
 
 @router.get("/{sku}")
-def analyze_sku_aging(sku: str, location_id: str, tenant_id: str):
+@requires_roles(["ADMIN", "MANAGER", "USER"])
+async def analyze_sku_aging(request: Request, sku: str, location_id: str, tenant_id: str):
     # Mock data that would normally be fetched from a repository
     now = datetime.now(timezone.utc)
     mock_entries = [{"quantity": 50, "occurred_at": datetime(2023, 1, 1, tzinfo=timezone.utc)}]
