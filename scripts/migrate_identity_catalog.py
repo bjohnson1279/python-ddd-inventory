@@ -13,7 +13,7 @@ from src.infrastructure.database import engine
 from src.infrastructure.auth.identity import TenantModel, UserModel, LoginSessionModel, LoginRateModel, SecurityAuditModel
 from src.infrastructure.auth.rls import install_tenant_policies
 from src.infrastructure.owned_feature_models import ReportDefinitionModel, NotificationModel
-from src.infrastructure.cycle_count.models import CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel
+from src.infrastructure.cycle_count.models import CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel, CountRequestModel
 from src.infrastructure.product.models import ProductModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
 from src.infrastructure.messaging.models import OutboxEventModel
@@ -24,8 +24,20 @@ from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 async def create_related(conn):
     for model in (StockModel, StockMovementModel, OutboxEventModel, CatalogModel, VariantLinkModel, BarcodeModel,
                   AccountingConfigModel, CostLayerModel, ReportDefinitionModel, NotificationModel,
-                  CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel):
+                  CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel, CountRequestModel):
         await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
+    upgrades = {
+        'cycle_count_records': {'location_id': 'VARCHAR', 'revision': 'INTEGER NOT NULL DEFAULT 0',
+                               'approved_by': 'VARCHAR', 'approval_result': 'JSON'},
+        'cycle_count_line_items': {'stock_version': 'INTEGER'},
+    }
+    for table, additions in upgrades.items():
+        columns = {c['name'] for c in await conn.run_sync(lambda sync: inspect(sync).get_columns(table))}
+        for name, ddl in additions.items():
+            if name not in columns:
+                await conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}'))
+    if conn.dialect.name == 'postgresql':
+        await conn.execute(text('ALTER TABLE cycle_count_line_items ALTER COLUMN variance_value TYPE BIGINT'))
     # Preserve opening quantities without guessing costs; safe on repeat runs.
     rows = await conn.execute(select(StockModel.__table__,
         func.coalesce(func.sum(CostLayerModel.remaining_quantity), 0).label('layered'))

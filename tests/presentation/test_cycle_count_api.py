@@ -33,6 +33,8 @@ async def test_create_plan(async_client):
 
 @pytest.mark.asyncio
 async def test_schedule_audits(async_client):
+    await async_client.post('/products', json={'sku': 'SCHEDULE', 'name': 'Item', 'price_amount': '1.00'})
+    await async_client.post('/inventory/receive', json={'sku': 'SCHEDULE', 'quantity': 10})
     await async_client.post("/api/cycle-counts/plans", json={
         "tenant_id": "tenant-1",
         "name": "Daily A-Items",
@@ -44,6 +46,9 @@ async def test_schedule_audits(async_client):
     })
     assert response.status_code == 200
     assert response.json()["scheduled"] == 1
+    repeated = await async_client.post('/api/cycle-counts/schedule', json={'tenant_id': 'tenant-1'})
+    assert repeated.json()['scheduled'] == 0
+    assert response.json()['audits'][0]['items'][0]['expected_quantity'] == 10
 
 @pytest.mark.asyncio
 async def test_get_assigned_counts(async_client):
@@ -63,7 +68,8 @@ async def test_submit_count_matched(async_client):
     })
     assert response.status_code == 200
     assert response.json()["success"] is True
-    assert response.json()["status"] == "COMPLETED"
+    assert response.json()["status"] == "SUBMITTED"
+    assert response.json()['requiresReview'] is True
 
 @pytest.mark.asyncio
 async def test_submit_count_variance_flagged(async_client):
@@ -75,8 +81,9 @@ async def test_submit_count_variance_flagged(async_client):
         ]
     })
     assert response.status_code == 200
-    assert response.json()["success"] is False
-    assert response.json()["status"] == "RECOUNT_REQUIRED"
+    assert response.json()["success"] is True
+    assert response.json()["status"] == "SUBMITTED"
+    assert response.json()['varianceFlagged'] is True
 
 @pytest.mark.asyncio
 async def test_offline_sync(async_client):
@@ -84,11 +91,14 @@ async def test_offline_sync(async_client):
     response = await async_client.post("/api/cycle-counts/sync", json=[
         {
             "record_id": "rec-sync-1",
+            "revision": 0, "mutation_id": "offline-1",
             "items": [{"sku": "SKU-3", "counted_quantity": 10}]
         },
         {
             "record_id": "rec-sync-2",
+            "revision": 0, "mutation_id": "offline-2",
             "items": [{"sku": "SKU-4", "counted_quantity": 12}]
         }
     ])
-    assert response.status_code == 501
+    assert response.status_code == 200
+    assert len(response.json()['results']) == 2

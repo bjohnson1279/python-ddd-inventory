@@ -56,7 +56,7 @@ def permission_for(path, method):
     if path.startswith('/notifications'):
         return 'notifications:self'
     if path.startswith('/cycle-counts'):
-        if path.endswith(('/plans', '/schedule', '/classify')):
+        if path.endswith(('/plans', '/schedule', '/classify', '/start', '/approve', '/recount', '/adjust')):
             return 'counts:manage'
         return 'counts:read' if read else 'counts:submit'
     if path.startswith('/reports') or path.startswith('/aging'):
@@ -68,6 +68,8 @@ def permission_for(path, method):
     if path.startswith('/barcodes'):
         return 'inventory:write' if path.endswith('/scan') else ('catalog:read' if read else 'catalog:write')
     if path.startswith('/inventory') or path.startswith('/offline-sync'):
+        if path.endswith('/adjust'):
+            return 'counts:manage'
         return 'inventory:read' if read else 'inventory:write'
     return 'identity:self'
 

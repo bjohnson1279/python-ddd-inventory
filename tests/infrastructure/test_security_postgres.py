@@ -1,6 +1,7 @@
 """Exercise forced RLS with a non-owner, non-superuser database login."""
 import os
 import uuid
+import asyncio
 import pytest
 from httpx import AsyncClient, ASGITransport
 from fastapi import Request
@@ -30,6 +31,14 @@ async def test_restricted_postgres_role_enforces_tenant_scope_and_auth_revocatio
     await bootstrap.dispose()
     owner_engine = create_async_engine(url, connect_args={'server_settings': {'search_path': schema}})
     monkeypatch.setattr(migration, 'engine', owner_engine)
+    # Upgrade real pre-count-reconciliation tables, rather than only a fresh schema.
+    async with owner_engine.begin() as conn:
+        await conn.execute(text('CREATE TABLE cycle_count_records (id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL, '
+            'plan_id VARCHAR, name VARCHAR NOT NULL, status VARCHAR NOT NULL, abc_classification VARCHAR NOT NULL, '
+            'zone VARCHAR, assigned_operator_id VARCHAR, is_blind_count BOOLEAN, created_at TIMESTAMP)'))
+        await conn.execute(text('CREATE TABLE cycle_count_line_items (id VARCHAR PRIMARY KEY, record_id VARCHAR NOT NULL, '
+            'sku VARCHAR NOT NULL, expected_quantity INTEGER NOT NULL, counted_quantity INTEGER, '
+            'variance_quantity INTEGER, variance_value INTEGER, status VARCHAR NOT NULL)'))
     await migration.migrate()
     await migration.migrate()  # Existing-table upgrades and policy installation are repeatable.
     async with owner_engine.begin() as conn:
@@ -115,6 +124,29 @@ async def test_restricted_postgres_role_enforces_tenant_scope_and_auth_revocatio
             async with restricted.begin() as conn:
                 await conn.execute(text("SELECT set_config('app.current_tenant_id', 'store-a', true)"))
                 assert await conn.scalar(text('SELECT count(*) FROM python_security_audit')) == 3
+            count = await client.post('/api/cycle-counts/start', headers=a, json={
+                'location_id': 'store', 'mutation_id': 'count-start'})
+            assert count.status_code == 200, count.text
+            record_id = count.json()['record_id']
+            submitted = await client.post('/api/cycle-counts/submit', headers=a, json={
+                'record_id': record_id, 'revision': 0, 'mutation_id': 'count-submit',
+                'items': [{'sku': 'SAME-SKU', 'counted_quantity': 1}]})
+            assert submitted.status_code == 200, submitted.text
+            endpoint = '/api/cycle-counts/' + record_id + '/approve'
+            assert (await client.post(endpoint, headers=b, json={
+                'revision': 0, 'reason': 'Foreign', 'mutation_id': 'foreign'})).status_code == 404
+            approved = await asyncio.gather(*(client.post(endpoint, headers=a, json={
+                'revision': 0, 'reason': 'Verified', 'mutation_id': 'approve-' + str(index)}) for index in range(2)))
+            assert [r.status_code for r in approved] == [200, 200], [r.text for r in approved]
+            assert approved[0].json() == approved[1].json()
+            assert approved[0].json()['adjustments'][0]['inventoryValueChangeCents'] == -100
+            assert (await client.get('/accounting/valuation-report', headers=a)).json()[0]['totalValueCents'] == 100
+            async with restricted.begin() as conn:
+                assert await conn.scalar(text('SELECT count(*) FROM python_count_requests')) == 0
+                await conn.execute(text("SELECT set_config('app.current_tenant_id', 'store-a', true)"))
+                assert await conn.scalar(text("SELECT count(*) FROM python_stock_movements WHERE operation='adjust'")) == 1
+                assert await conn.scalar(text("SELECT count(*) FROM outbox_events WHERE event_type='StockAdjusted'")) == 1
+                assert await conn.scalar(text("SELECT count(*) FROM cycle_count_records WHERE status='COMPLETED'")) == 1
             assert (await client.post('/auth/logout', headers=a)).status_code == 200
             assert (await client.get('/products', headers=a)).status_code == 401
             assert (await client.get('/products', headers=b)).status_code == 200

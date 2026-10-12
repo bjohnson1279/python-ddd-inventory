@@ -7,7 +7,7 @@ async def install_tenant_policies(conn):
     tables = ['products', 'python_catalog', 'python_variant_links', 'python_barcodes',
               'python_stock', 'python_stock_movements', 'python_cost_layers', 'python_accounting_config',
               'python_report_definitions', 'python_notifications', 'python_security_audit',
-              'cycle_count_plans', 'cycle_count_records']
+              'cycle_count_plans', 'cycle_count_records', 'python_count_requests']
     quote = conn.dialect.identifier_preparer.quote
     predicate = "tenant_id = current_setting('app.current_tenant_id', true)"
     for table in tables:

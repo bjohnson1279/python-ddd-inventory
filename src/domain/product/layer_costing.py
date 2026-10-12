@@ -70,11 +70,19 @@ def redistribute_value(layers, total_value):
         layer.remaining_value_cents += 1
 
 
-def consume(layers, quantity, method, now=None, lot_number=None):
+def consume(layers, quantity, method, now=None, lot_number=None, include_ineligible=False):
     if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
         raise ValueError('Quantity must be a positive integer')
     method = normalize_method(method)
     selected = eligible_layers(layers, method, now, lot_number)
+    if include_ineligible:
+        selected = [layer for layer in layers if layer.remaining_quantity > 0
+                    and (lot_number is None or layer.lot_number == lot_number)]
+        selected.sort(key=lambda layer: (
+            utc(layer.expiration_date) if method == CostingMethod.FEFO and layer.expiration_date
+            else datetime.max.replace(tzinfo=timezone.utc) if method == CostingMethod.FEFO
+            else utc(layer.received_at), utc(layer.received_at), layer.id),
+            reverse=method == CostingMethod.LIFO)
     if sum(layer.remaining_quantity for layer in selected) < quantity:
         raise ValueError('Insufficient eligible cost layers for requested quantity or lot')
     active = [layer for layer in layers if layer.remaining_quantity]

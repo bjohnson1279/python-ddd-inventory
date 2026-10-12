@@ -79,13 +79,21 @@ async def test_password_change_revokes_all_sessions(client):
 
 @pytest.mark.asyncio
 async def test_login_throttle_persists_and_ignores_forwarded_ip_spoofing(client, monkeypatch):
+    import time
+    from types import SimpleNamespace
+    from src.infrastructure.auth import security
+    clock = [int(time.time())]
+    monkeypatch.setattr(security, 'time', SimpleNamespace(time=lambda: clock[0]))
     monkeypatch.setattr('src.presentation.auth_router.verify_password', lambda *args: False)
-    payload = {'tenantId': 'tenant-1', 'email': 'admin@example.com', 'password': 'wrong'}
-    for _ in range(9):
+    # A new account avoids relying on the fixture login's rate-limit bucket.
+    payload = {'tenantId': 'tenant-1', 'email': 'rate-limit@example.com', 'password': 'wrong'}
+    for _ in range(10):
         assert client.post('/auth/login', json=payload).status_code == 401
     denied = client.post('/auth/login', json=payload)
     assert denied.status_code == 429 and int(denied.headers['Retry-After']) > 0
     assert client.post('/api/auth/login', headers={'X-Forwarded-For': 'new-address'}, json=payload).status_code == 429
+    clock[0] += 300
+    assert client.post('/auth/login', json=payload).status_code == 401
 
 
 @pytest.mark.asyncio
@@ -140,7 +148,8 @@ async def test_count_tenant_and_assignment_scopes(client, db_session):
     assert [record['record_id'] for record in assigned] == ['owned']
     assert assigned[0]['items'][0]['expected_quantity'] is None
     for record_id in ('unassigned', 'foreign', 'missing'):
-        payload = {'record_id': record_id, 'items': [{'sku': 'COUNT-SKU', 'counted_quantity': 10}]}
+        payload = {'record_id': record_id, 'revision': 0, 'mutation_id': 'sync-' + record_id,
+                   'items': [{'sku': 'COUNT-SKU', 'counted_quantity': 10}]}
         assert client.post('/api/cycle-counts/submit', headers=headers, json=payload).status_code == 404
         assert client.post('/api/cycle-counts/sync', headers=headers, json=[payload]).status_code == 404
     assert client.post('/api/cycle-counts/submit', headers=headers, json={

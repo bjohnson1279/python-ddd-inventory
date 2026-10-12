@@ -3,7 +3,7 @@
 This first implementation slice provides persisted tenant/admin setup, password
 hashing, one-hour HS256 access tokens, role-populated request identity and tenant
 catalog isolation, quantity variants, barcode assignment/scanning and stock
-operations. Serial tracking, procurement and count reconciliation
+operations. Serial tracking and procurement
 remain unfinished.
 Lot-backed costing and valuation have since been implemented; see `COSTING.md`
 for methods, receipt fields, opening-stock pricing and migration instructions.
@@ -25,7 +25,7 @@ returns the original result; changing its payload returns 409. Supply a stable
 mutation ID when retrying requests. Concurrent version conflicts return 409.
 Stock quantity, allocation, movement history and outbox enqueue share one database
 transaction. Dispatch cannot consume reserved stock. A catalog SKU must exist
-in the authenticated tenant. New stock supports discrete units only; lots,
+in the authenticated tenant. New stock supports discrete units only;
 transfers and UOM conversion remain follow-up work. Cost layers and valuation
 are now implemented as described in `COSTING.md`.
 
@@ -71,7 +71,8 @@ audit, forced PostgreSQL policies and explicit failures for unfinished features.
 
 Tests now use actual setup/login rather than globally mocking every request as an
 administrator. Follow-up work: serial variants and transfers,
-financial journal posting, count reconciliation and advanced identity features.
+financial journal posting and advanced identity features. Reviewed count
+reconciliation and offline submissions are now implemented; see `COUNTS.md`.
 Revocation, throttling and restricted-role PostgreSQL checks are now implemented.
 
 ## Verification (2026-10-11)
@@ -92,5 +93,5 @@ lifespan/test-client/time handling.
 
 No database migration was applied to a running store, and no commit or deployment
 was made in that first slice. Costing and valuation are now implemented. Remaining
-parity work includes transfers, procurement, serials and durable physical-count
-reconciliation.
+parity work includes transfers, procurement and serials. Physical counts now
+reconcile through explicit manager approval as described in `COUNTS.md`.

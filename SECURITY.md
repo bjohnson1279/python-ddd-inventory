@@ -68,7 +68,7 @@ comes from verified identity. Cross-tenant object IDs return not-found responses
   items. Operators can submit only assigned counts; administrators/managers can
   work with owned-tenant counts. Missing, closed or unpersisted counts cannot
   create fabricated successful submissions. Persisted lines/status are saved;
-  stock/cost reconciliation remains separate unfinished feature work.
+  stock/cost reconciliation is now implemented through manager review; see `COUNTS.md`.
 - Report definitions are persisted and tenant-owned. Execution/scheduling first
   verify ownership, then return 501 until durable jobs are implemented. Unverified
   report-share tokens return 404; arbitrary tokens never become download URLs.
@@ -127,6 +127,6 @@ use real login rather than mocked administrator roles or permissive status sets.
 The PostgreSQL scenarios are part of the dedicated backend CI job.
 
 Custom role editing, MFA/SSO, account-recovery delivery, supplier persistence,
-durable report/sharing jobs, offline reconciliation and active WebSocket
+durable report/sharing jobs and active WebSocket
 authorization remain additional work. No store database was migrated or service
 deployed during this change.
