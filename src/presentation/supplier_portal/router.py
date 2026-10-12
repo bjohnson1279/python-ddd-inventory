@@ -6,6 +6,7 @@ from src.domain.supplier_collaboration.entity import AdvanceShippingNotice, ASNL
 from src.domain.supplier_collaboration.services import ASNSubmissionService
 from src.domain.supplier_collaboration.repository import SupplierCollaborationRepository
 from src.infrastructure.auth.rbac import requires_roles
+from src.infrastructure.auth.identity import current_tenant
 
 router = APIRouter(prefix="/api/supplier-portal", tags=["SupplierPortal"])
 
@@ -26,14 +27,16 @@ class ASNSubmitDTO(BaseModel):
     estimated_delivery_date: datetime
     items: List[ASNLineItemDTO]
 
-def get_supplier_repo() -> SupplierCollaborationRepository:
-    # Dependency stub
-    return None
+def get_supplier_repo(request: Request) -> SupplierCollaborationRepository:
+    current_tenant(request)
+    if not getattr(request.state, 'supplier_id', None):
+        raise HTTPException(403, 'Supplier identity is not bound to this user')
+    raise HTTPException(501, 'Tenant-scoped supplier persistence is not implemented')
 
 @router.get("/pos")
 @requires_roles(["SUPPLIER_USER"])
 async def list_supplier_pos(request: Request, repo: SupplierCollaborationRepository = Depends(get_supplier_repo)):
-    supplier_id = getattr(request.state, "supplier_id", "mock_supplier_1")
+    supplier_id = request.state.supplier_id
     if repo:
         pos = await repo.get_supplier_pos(supplier_id)
         return {"pos": pos}
@@ -42,7 +45,7 @@ async def list_supplier_pos(request: Request, repo: SupplierCollaborationReposit
 @router.post("/pos/{po_id}/acknowledge")
 @requires_roles(["SUPPLIER_USER"])
 async def acknowledge_po(po_id: str, dto: POAcknowledgementDTO, request: Request, repo: SupplierCollaborationRepository = Depends(get_supplier_repo)):
-    supplier_id = getattr(request.state, "supplier_id", "mock_supplier_1")
+    supplier_id = request.state.supplier_id
     
     if repo:
         po = await repo.get_po(po_id)
@@ -59,7 +62,7 @@ async def acknowledge_po(po_id: str, dto: POAcknowledgementDTO, request: Request
 @router.post("/asns")
 @requires_roles(["SUPPLIER_USER"])
 async def submit_asn(dto: ASNSubmitDTO, request: Request, repo: SupplierCollaborationRepository = Depends(get_supplier_repo)):
-    supplier_id = getattr(request.state, "supplier_id", "mock_supplier_1")
+    supplier_id = request.state.supplier_id
     service = ASNSubmissionService()
     
     if repo:
@@ -93,7 +96,7 @@ async def submit_asn(dto: ASNSubmitDTO, request: Request, repo: SupplierCollabor
 @router.get("/performance")
 @requires_roles(["SUPPLIER_USER"])
 async def get_supplier_performance(request: Request, repo: SupplierCollaborationRepository = Depends(get_supplier_repo)):
-    supplier_id = getattr(request.state, "supplier_id", "mock_supplier_1")
+    supplier_id = request.state.supplier_id
     if repo:
         perf = await repo.get_performance(supplier_id)
         return {"performance": perf}

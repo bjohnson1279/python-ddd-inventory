@@ -1,82 +1,56 @@
-from fastapi import APIRouter, HTTPException, Body, Path, Request
-from typing import Dict, Any, List
-from datetime import datetime, timedelta
-import uuid
-import re
+from fastapi import APIRouter, HTTPException, Body, Request, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.infrastructure.database import get_db_session
+from src.infrastructure.owned_feature_models import ReportDefinitionModel
+from src.infrastructure.auth.identity import current_tenant
 
-from src.infrastructure.auth.rbac import requires_roles
+router = APIRouter(prefix='/reports', tags=['reports'])
 
-# In a real app we'd have DB dependencies and auth dependencies
-# For scaffolding we'll mock them.
-router = APIRouter(prefix="/reports", tags=["reports"])
 
-@router.post("/")
-@requires_roles(['ADMIN', 'MANAGER'])
-async def create_report(request: Request, payload: Dict[str, Any] = Body(...)):
-    """Creates a new report definition."""
-    tenant_id = payload.get("tenant_id", "tenant-1")
-    report = {
-        "id": str(uuid.uuid4()),
-        "tenant_id": tenant_id,
-        "name": payload.get("name"),
-        "description": payload.get("description"),
-        "type": payload.get("type"),
-        "filters": payload.get("filters", {}),
-        "grouping": payload.get("grouping", {}),
-        "created_by": "system"
-    }
-    # Mock db save
-    return {"success": True, "report": report}
+def dto(report):
+    return {**report.payload, 'id': report.id, 'tenant_id': report.tenant_id, 'created_by': report.created_by}
 
-@router.get("/")
-@requires_roles(['ADMIN', 'MANAGER', 'USER'])
-async def list_reports(request: Request):
-    """List report definitions for the tenant."""
-    return {"reports": []}
 
-@router.post("/{id}/execute")
-@requires_roles(['ADMIN', 'MANAGER'])
-async def execute_report(request: Request, id: str = Path(...), payload: Dict[str, Any] = Body(...)):
-    format_str = payload.get("format", "csv")
-    execution_id = str(uuid.uuid4())
-    
-    # Mock outbox event emission for ReportGenerationWorker
-    # Mock DB save for ReportExecution
-    
-    return {
-        "success": True,
-        "message": "Report execution queued",
-        "executionId": execution_id
-    }
+async def owned_report(session, request, report_id):
+    report = await session.scalar(select(ReportDefinitionModel).where(
+        ReportDefinitionModel.id == report_id, ReportDefinitionModel.tenant_id == current_tenant(request)))
+    if not report:
+        raise HTTPException(404, 'Report not found')
+    return report
 
-@router.post("/{id}/schedule")
-@requires_roles(['ADMIN', 'MANAGER'])
-async def schedule_report(request: Request, id: str = Path(...), payload: Dict[str, Any] = Body(...)):
-    cron = payload.get("cronExpression")
-    delivery_method = payload.get("deliveryMethod", "INTERNAL")
-    
-    schedule = {
-        "id": str(uuid.uuid4()),
-        "reportDefinitionId": id,
-        "cronExpression": cron,
-        "nextRunAt": (datetime.utcnow() + timedelta(hours=1)).isoformat(),
-        "deliveryMethod": delivery_method
-    }
-    return {"success": True, "schedule": schedule}
 
-@router.get("/shared/{token}")
-async def get_shared_link(token: str = Path(...)):
-    # Validate token to prevent path traversal
-    if not re.match(r'^[a-zA-Z0-9_-]+$', token):
-        raise HTTPException(status_code=400, detail="Invalid token format")
+@router.post('/')
+async def create_report(request: Request, payload: dict = Body(...), session: AsyncSession = Depends(get_db_session)):
+    if not isinstance(payload.get('name'), str) or not payload['name'].strip():
+        raise HTTPException(422, 'Report name is required')
+    report = ReportDefinitionModel(tenant_id=current_tenant(request), created_by=request.state.user_id,
+        payload={key: payload[key] for key in ('name', 'description', 'type', 'filters', 'grouping') if key in payload})
+    session.add(report)
+    await session.commit()
+    return {'success': True, 'report': dto(report)}
 
-    # Mock token lookup
-    if token == "expired":
-        raise HTTPException(status_code=403, detail="Link expired")
-    if token == "invalid":
-        raise HTTPException(status_code=404, detail="Link not found")
-        
-    return {
-        "success": True,
-        "fileUrl": f"/uploads/reports/report_{token}.csv"
-    }
+
+@router.get('/')
+async def list_reports(request: Request, session: AsyncSession = Depends(get_db_session)):
+    reports = await session.scalars(select(ReportDefinitionModel).where(
+        ReportDefinitionModel.tenant_id == current_tenant(request)))
+    return {'reports': [dto(report) for report in reports]}
+
+
+@router.post('/{id}/execute')
+async def execute_report(id: str, request: Request, session: AsyncSession = Depends(get_db_session)):
+    await owned_report(session, request, id)
+    raise HTTPException(501, 'Durable report generation is not implemented')
+
+
+@router.post('/{id}/schedule')
+async def schedule_report(id: str, request: Request, session: AsyncSession = Depends(get_db_session)):
+    await owned_report(session, request, id)
+    raise HTTPException(501, 'Durable report scheduling is not implemented')
+
+
+@router.get('/shared/{token}')
+async def get_shared_link(token: str):
+    # No persisted, verified share grants exist yet.
+    raise HTTPException(404, 'Report share not found')

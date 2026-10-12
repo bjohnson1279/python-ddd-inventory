@@ -16,7 +16,7 @@ async def test_list_supplier_pos(async_client):
     response = await async_client.get("/api/supplier-portal/pos")
     
     # Expect 401 Unauthorized because test client does not have SUPPLIER_USER role automatically in this stub
-    assert response.status_code in [200, 401, 403]
+    assert response.status_code == 401
 
 @pytest.mark.asyncio
 async def test_acknowledge_po_no_auth(async_client):
@@ -24,7 +24,7 @@ async def test_acknowledge_po_no_auth(async_client):
         "/api/supplier-portal/pos/po-123/acknowledge", 
         json={"expected_delivery_date": datetime.utcnow().isoformat()}
     )
-    assert response.status_code in [401, 403]
+    assert response.status_code == 401
 
 @pytest.mark.asyncio
 async def test_submit_asn_no_auth(async_client):
@@ -37,4 +37,4 @@ async def test_submit_asn_no_auth(async_client):
             "items": [{"sku": "SKU1", "shipped_quantity": 100}]
         }
     )
-    assert response.status_code in [401, 403]
+    assert response.status_code == 401

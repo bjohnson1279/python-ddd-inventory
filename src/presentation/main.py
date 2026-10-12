@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from src.presentation.product.router import router as product_router
 from src.presentation.cycle_count.router import router as cycle_count_router
 from contextlib import asynccontextmanager
@@ -17,13 +17,14 @@ from src.application.workers.outbox_worker import OutboxWorker
 from src.infrastructure.telemetry import setup_telemetry
 from src.presentation.graphql import graphql_app
 
-app = FastAPI(title='Python DDD Inventory API', lifespan=lifespan)
+from src.infrastructure.auth.security import authorize_request
+app = FastAPI(title='Python DDD Inventory API', lifespan=lifespan, dependencies=[Depends(authorize_request)])
 import os
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(CORSMiddleware,
     allow_origins=[origin.strip() for origin in os.getenv(
         'CORS_ORIGINS', 'http://localhost:3000,http://localhost:5173').split(',') if origin.strip()],
-    allow_methods=['GET', 'POST', 'OPTIONS'],
+    allow_methods=['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allow_headers=['Authorization', 'Content-Type', 'X-Tenant-ID'])
 
 from src.presentation.auth_router import router as auth_router
@@ -33,6 +34,9 @@ import jwt
 
 app.include_router(auth_router)
 app.include_router(auth_router, prefix='/api')
+from src.presentation.users_router import router as users_router
+app.include_router(users_router)
+app.include_router(users_router, prefix='/api')
 from src.presentation.stock_router import router as stock_router
 app.include_router(stock_router)
 app.include_router(stock_router, prefix='/api')
@@ -56,15 +60,18 @@ async def authenticate(request: Request, call_next):
                 raise jwt.InvalidTokenError()
             if not isinstance(claims['roles'], list):
                 raise jwt.InvalidTokenError()
+            if not isinstance(claims['sub'], str) or not isinstance(claims['jti'], str) or type(claims['ver']) is not int:
+                raise jwt.InvalidTokenError()
         except jwt.InvalidTokenError:
             return JSONResponse({'detail': 'Invalid or expired token'}, status_code=401)
         request.state.tenant_id = claims['tenantId']
+        request.state.claims = claims
         request.state.user_id = claims['sub']
         request.state.roles = claims['roles']
         request.state.permissions = claims.get('permissions', [])
-    supplied_tenant = request.headers.get('X-Tenant-ID') or request.query_params.get('tenantId')
-    if supplied_tenant and supplied_tenant != getattr(request.state, 'tenant_id', None):
-        return JSONResponse({'detail': 'Tenant ID mismatch'}, status_code=403)
+    for supplied_tenant in request.headers.getlist('X-Tenant-ID') + request.query_params.getlist('tenantId') + request.query_params.getlist('tenant_id'):
+        if supplied_tenant != getattr(request.state, 'tenant_id', None):
+            return JSONResponse({'detail': 'Tenant ID mismatch'}, status_code=403)
     return await call_next(request)
 
 # Setup Distributed Tracing & Observability
@@ -83,6 +90,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers['Cache-Control'] = 'no-store'
     return response
 
 

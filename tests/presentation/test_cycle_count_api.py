@@ -2,6 +2,17 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 import pytest_asyncio
 from src.presentation.main import app
+from src.infrastructure.cycle_count.models import CycleCountRecordModel, CycleCountLineItemModel
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def seeded_records(db_session):
+    for record_id, sku in [('rec-123', 'SKU-1'), ('rec-456', 'SKU-2'),
+                           ('rec-sync-1', 'SKU-3'), ('rec-sync-2', 'SKU-4')]:
+        db_session.add(CycleCountRecordModel(id=record_id, tenant_id='tenant-1', name='Count',
+                                            status='PENDING', abc_classification='A'))
+        db_session.add(CycleCountLineItemModel(record_id=record_id, sku=sku, expected_quantity=10))
+    await db_session.commit()
 
 @pytest_asyncio.fixture
 async def async_client(client): # Depends on conftest 'client' fixture which sets up db
@@ -80,6 +91,4 @@ async def test_offline_sync(async_client):
             "items": [{"sku": "SKU-4", "counted_quantity": 12}]
         }
     ])
-    assert response.status_code == 200
-    assert len(response.json()["results"]) == 2
-    assert response.json()["results"][0]["synced"] is True
+    assert response.status_code == 501

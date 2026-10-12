@@ -6,7 +6,7 @@ from src.infrastructure.database import get_db_session
 from src.infrastructure.product.repository import SQLAlchemyProductRepository
 from src.application.product.services import ProductService
 from src.domain.product.exceptions import ProductNotFoundError, InvalidSKUError, InvalidPriceError
-from src.infrastructure.auth.rbac import requires_roles
+from src.infrastructure.auth.rbac import requires_roles, requires_permissions
 from src.infrastructure.auth.identity import current_tenant
 
 router = APIRouter(prefix='/products', tags=['products'])
@@ -49,7 +49,7 @@ async def create_product(data: ProductCreateDTO, request: Request, service: Prod
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get('/{product_id}', response_model=ProductResponseDTO)
-@requires_roles(['ADMIN', 'MANAGER', 'USER'])
+@requires_permissions(['catalog:read'])
 async def get_product(product_id: str, request: Request, service: ProductService = Depends(get_product_service)):
     try:
         product = await service.get_product(product_id)
@@ -64,7 +64,7 @@ async def get_product(product_id: str, request: Request, service: ProductService
         raise HTTPException(status_code=404, detail=str(e))
 
 @router.get('', response_model=List[ProductResponseDTO])
-@requires_roles(['ADMIN', 'MANAGER', 'USER'])
+@requires_permissions(['catalog:read'])
 async def list_products(request: Request, limit: int = 100, offset: int = 0, service: ProductService = Depends(get_product_service)):
     products = await service.list_products(limit, offset)
     return [

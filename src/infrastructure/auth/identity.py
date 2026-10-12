@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import HTTPException, Request
-from sqlalchemy import Column, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Column, ForeignKey, String, UniqueConstraint, Integer, Boolean, DateTime
 from src.infrastructure.database import Base
 
 
@@ -28,6 +28,35 @@ class UserModel(Base):
     name = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default='ADMIN')
+    is_active = Column(Boolean, nullable=False, default=True)
+    auth_version = Column(Integer, nullable=False, default=0)
+    supplier_id = Column(String, nullable=True)
+
+
+class LoginSessionModel(Base):
+    __tablename__ = 'python_login_sessions'
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey('python_users.id'), nullable=False, index=True)
+    tenant_id = Column(String, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked = Column(Boolean, nullable=False, default=False)
+
+
+class LoginRateModel(Base):
+    __tablename__ = 'python_login_limits'
+    key = Column(String, primary_key=True)
+    attempts = Column(Integer, nullable=False)
+    expires_at = Column(Integer, nullable=False)
+
+
+class SecurityAuditModel(Base):
+    __tablename__ = 'python_security_audit'
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, nullable=False, index=True)
+    actor_id = Column(String, nullable=False)
+    target_id = Column(String, nullable=False)
+    action = Column(String, nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 def password_hash(password: str) -> str:
@@ -51,9 +80,10 @@ def jwt_secret() -> str:
     return secret
 
 
-def issue_token(user: UserModel) -> str:
+def issue_token(user: UserModel, session_id: str | None = None) -> str:
     now = datetime.now(timezone.utc)
     return jwt.encode({'sub': user.id, 'tenantId': user.tenant_id, 'roles': [user.role],
+                       'jti': session_id or uuid.uuid4().hex, 'ver': user.auth_version,
                        'permissions': [], 'iat': now, 'exp': now + timedelta(hours=1),
                        'iss': 'python-ddd-inventory', 'aud': 'inventory-client'},
                       jwt_secret(), algorithm='HS256')
@@ -62,7 +92,7 @@ def issue_token(user: UserModel) -> str:
 def decode_token(token: str) -> dict:
     return jwt.decode(token, jwt_secret(), algorithms=['HS256'],
                       issuer='python-ddd-inventory', audience='inventory-client',
-                      options={'require': ['sub', 'tenantId', 'roles', 'iat', 'exp']})
+                      options={'require': ['sub', 'tenantId', 'jti', 'ver', 'roles', 'iat', 'exp']})
 
 
 def current_tenant(request: Request) -> str:

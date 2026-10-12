@@ -10,7 +10,10 @@ from sqlalchemy import inspect, text, select, func
 import uuid
 from datetime import datetime, timezone
 from src.infrastructure.database import engine
-from src.infrastructure.auth.identity import TenantModel, UserModel
+from src.infrastructure.auth.identity import TenantModel, UserModel, LoginSessionModel, LoginRateModel, SecurityAuditModel
+from src.infrastructure.auth.rls import install_tenant_policies
+from src.infrastructure.owned_feature_models import ReportDefinitionModel, NotificationModel
+from src.infrastructure.cycle_count.models import CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel
 from src.infrastructure.product.models import ProductModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
 from src.infrastructure.messaging.models import OutboxEventModel
@@ -20,7 +23,8 @@ from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 
 async def create_related(conn):
     for model in (StockModel, StockMovementModel, OutboxEventModel, CatalogModel, VariantLinkModel, BarcodeModel,
-                  AccountingConfigModel, CostLayerModel):
+                  AccountingConfigModel, CostLayerModel, ReportDefinitionModel, NotificationModel,
+                  CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel):
         await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
     # Preserve opening quantities without guessing costs; safe on repeat runs.
     rows = await conn.execute(select(StockModel.__table__,
@@ -37,6 +41,7 @@ async def create_related(conn):
                 location_id=stock['location_id'], initial_quantity=missing, remaining_quantity=missing,
                 unit_cost_cents=None, remaining_value_cents=None, received_at=datetime.now(timezone.utc),
                 quarantined=False))
+    await install_tenant_policies(conn)
 
 
 async def migrate(legacy_tenant=None, identity_only=False):
@@ -45,6 +50,16 @@ async def migrate(legacy_tenant=None, identity_only=False):
     async with engine.begin() as conn:
         await conn.run_sync(lambda sync: TenantModel.__table__.create(sync, checkfirst=True))
         await conn.run_sync(lambda sync: UserModel.__table__.create(sync, checkfirst=True))
+        columns = {column['name'] for column in await conn.run_sync(lambda sync: inspect(sync).get_columns('python_users'))}
+        if 'is_active' not in columns:
+            default = 'TRUE' if conn.dialect.name == 'postgresql' else '1'
+            await conn.execute(text(f'ALTER TABLE python_users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT {default}'))
+        if 'auth_version' not in columns:
+            await conn.execute(text('ALTER TABLE python_users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0'))
+        if 'supplier_id' not in columns:
+            await conn.execute(text('ALTER TABLE python_users ADD COLUMN supplier_id VARCHAR'))
+        for model in (LoginSessionModel, LoginRateModel, SecurityAuditModel):
+            await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
     if identity_only:
         return
     async with engine.begin() as conn:

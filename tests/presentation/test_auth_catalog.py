@@ -51,10 +51,11 @@ async def test_authentication_failures_and_setup_cannot_replace_admin(client):
 
 @pytest.mark.asyncio
 async def test_reader_cannot_create_catalog_items(client):
-    claims = jwt.decode(client.headers['Authorization'].split()[1], jwt_secret(), algorithms=['HS256'],
-                        audience='inventory-client', issuer='python-ddd-inventory')
-    claims['roles'] = ['USER']
-    headers = {'Authorization': 'Bearer ' + jwt.encode(claims, jwt_secret(), algorithm='HS256')}
+    assert client.post('/users', json={'email': 'reader@example.com', 'role': 'USER',
+                                      'password': 'test-password'}).status_code == 201
+    login = client.post('/auth/login', json={'tenantId': 'tenant-1', 'email': 'reader@example.com',
+                                           'password': 'test-password'})
+    headers = {'Authorization': 'Bearer ' + login.json()['token']}
     assert client.get('/products', headers=headers).status_code == 200
     assert client.post('/products', headers=headers, json={
         'sku': 'NEW-SKU', 'name': 'Unauthorized', 'price_amount': '1.00'}).status_code == 403

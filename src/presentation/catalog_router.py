@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.database import get_db_session
 from src.infrastructure.auth.identity import current_tenant
 from src.infrastructure.auth.rbac import requires_roles
+from src.infrastructure.auth.security import require_purchase_cost_permission, stock_response
 from src.infrastructure.catalog_models import CatalogModel, VariantLinkModel, BarcodeModel
 from src.infrastructure.product.models import ProductModel
 from src.domain.product.value_objects import SKU
@@ -175,16 +176,18 @@ async def scan(data: ScanDTO, request: Request, session: AsyncSession = Depends(
     tenant = current_tenant(request)
     if data.tenantId is not None and data.tenantId != tenant:
         raise HTTPException(403, 'Tenant ID mismatch')
+    require_purchase_cost_permission(request, data.unitCostCents)
     barcode = await session.scalar(select(BarcodeModel).where(
         BarcodeModel.tenant_id == tenant, BarcodeModel.value == data.barcodeValue))
     if not barcode:
         raise HTTPException(404, 'Barcode not found')
     try:
-        return await StockService(session, tenant, request.state.user_id).mutate(
+        result = await StockService(session, tenant, request.state.user_id).mutate(
             'receive' if data.context == 'receiving' else 'dispatch', barcode.sku,
             data.locationId, data.scannedAmount, data.mutationId,
             unit_cost_cents=data.unitCostCents, lot_number=data.lotNumber,
             expiration_date=data.expirationDate)
+        return stock_response(request, result)
     except StockConflict as exc:
         raise HTTPException(409, str(exc))
     except ValueError as exc:

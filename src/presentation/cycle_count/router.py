@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +7,7 @@ from src.domain.cycle_count.entity import CycleCountPlan, CycleCountLineItem
 from src.domain.cycle_count.services import ABCClassificationService, CycleCountScheduler, CycleCountExecutionService
 from src.infrastructure.cycle_count.repository import SQLAlchemyCycleCountRepository
 from src.infrastructure.auth.rbac import requires_roles
+from src.infrastructure.auth.identity import current_tenant
 
 router = APIRouter(prefix='/api/cycle-counts', tags=['CycleCount'])
 
@@ -28,7 +29,7 @@ class ClassifyRequestDTO(BaseModel):
 @router.post('/plans')
 @requires_roles(['ADMIN', 'MANAGER'])
 async def create_plan(req: PlanCreateDTO, request: Request, db: AsyncSession = Depends(get_db_session)):
-    repo = SQLAlchemyCycleCountRepository(db)
+    repo = SQLAlchemyCycleCountRepository(db, current_tenant(request))
     plan = CycleCountPlan(
         tenant_id=req.tenant_id,
         name=req.name,
@@ -42,7 +43,7 @@ async def create_plan(req: PlanCreateDTO, request: Request, db: AsyncSession = D
 @router.post('/schedule')
 @requires_roles(['ADMIN', 'MANAGER'])
 async def schedule_audits(req: ScheduleRequestDTO, request: Request, db: AsyncSession = Depends(get_db_session)):
-    repo = SQLAlchemyCycleCountRepository(db)
+    repo = SQLAlchemyCycleCountRepository(db, current_tenant(request))
     scheduler = CycleCountScheduler()
     
     plans = await repo.get_active_plans(req.tenant_id)
@@ -64,8 +65,8 @@ async def classify_sku(req: ClassifyRequestDTO, request: Request):
 @router.get('/assigned')
 @requires_roles(['WAREHOUSE_OPERATOR', 'MANAGER', 'ADMIN'])
 async def get_assigned_counts(request: Request, db: AsyncSession = Depends(get_db_session)):
-    operator_id = getattr(request.state, 'user_id', 'mock_operator_123')
-    repo = SQLAlchemyCycleCountRepository(db)
+    operator_id = request.state.user_id
+    repo = SQLAlchemyCycleCountRepository(db, current_tenant(request))
     records = await repo.get_assigned_records(operator_id)
     
     record_ids = [record.id for record in records]
@@ -104,19 +105,23 @@ class SubmitCountDTO(BaseModel):
 @router.post('/submit')
 @requires_roles(['WAREHOUSE_OPERATOR', 'MANAGER', 'ADMIN'])
 async def submit_count(req: SubmitCountDTO, request: Request, db: AsyncSession = Depends(get_db_session)):
-    repo = SQLAlchemyCycleCountRepository(db)
+    repo = SQLAlchemyCycleCountRepository(db, current_tenant(request))
     service = CycleCountExecutionService()
+    record = await repo.get_record(req.record_id)
+    if not record or ('ADMIN' not in request.state.roles and 'MANAGER' not in request.state.roles
+                      and record.assigned_operator_id != request.state.user_id):
+        raise HTTPException(404, 'Count not found')
+    if record.status not in ('PENDING', 'RECOUNT_REQUIRED'):
+        raise HTTPException(409, 'Count is not open for submission')
     
     # In a real app we'd fetch actual items and update them.
     # For now we'll just mock the items based on the DTO.
     line_items = await repo.get_record_line_items(req.record_id)
     if not line_items:
-        # Scaffold logic for testing if they don't exist in DB
-        line_items = [
-            CycleCountLineItem(record_id=req.record_id, sku=dto.sku, expected_quantity=10, counted_quantity=dto.counted_quantity) 
-            for dto in req.items
-        ]
+        raise HTTPException(409, 'Count has no persisted lines')
     else:
+        if any(dto.sku not in {li.sku for li in line_items} for dto in req.items):
+            raise HTTPException(400, 'Unknown count line')
         # Match up quantities
         dto_map = {i.sku: i.counted_quantity for i in req.items}
         for li in line_items:
@@ -126,7 +131,7 @@ async def submit_count(req: SubmitCountDTO, request: Request, db: AsyncSession =
     success = service.process_submission(line_items)
     
     # Save the updated items back
-    # await repo.save_line_items(line_items) # Would usually update or save
+    await repo.save_line_items(line_items)
     
     record = await repo.get_record(req.record_id)
     if record:
@@ -142,9 +147,9 @@ async def submit_count(req: SubmitCountDTO, request: Request, db: AsyncSession =
 @router.post('/sync')
 @requires_roles(['WAREHOUSE_OPERATOR', 'ADMIN'])
 async def offline_sync(req: List[SubmitCountDTO], request: Request, db: AsyncSession = Depends(get_db_session)):
-    # Batch processing for offline mode
-    results = []
+    repo = SQLAlchemyCycleCountRepository(db, current_tenant(request))
     for submission in req:
-        # Call the submit logic
-        results.append({"record_id": submission.record_id, "synced": True})
-    return {"results": results}
+        record = await repo.get_record(submission.record_id)
+        if not record or ('ADMIN' not in request.state.roles and record.assigned_operator_id != request.state.user_id):
+            raise HTTPException(404, 'Count not found')
+    raise HTTPException(501, 'Durable offline count reconciliation is not implemented')

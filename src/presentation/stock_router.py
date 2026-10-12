@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.database import get_db_session
 from src.infrastructure.auth.identity import current_tenant
+from src.infrastructure.auth.security import require_purchase_cost_permission, stock_response
 from src.infrastructure.auth.rbac import requires_roles
 from src.infrastructure.stock_models import StockModel, StockMovementModel
 from src.application.stock_service import StockService, StockConflict, stock_dto
@@ -53,11 +54,13 @@ def register_mutation(operation):
         tenant = current_tenant(request)
         if data.tenantId is not None and data.tenantId != tenant:
             raise HTTPException(403, 'Tenant ID mismatch')
+        require_purchase_cost_permission(request, data.unitCostCents)
         try:
             service = StockService(session, tenant, request.state.user_id)
-            return await service.mutate(operation, data.sku, data.locationId, data.quantity,
+            result = await service.mutate(operation, data.sku, data.locationId, data.quantity,
                                         data.mutationId, data.expectedVersion, data.unitCostCents,
                                         data.lotNumber, data.expirationDate, data.receivedAt, data.quarantined)
+            return stock_response(request, result)
         except StockConflict as exc:
             raise HTTPException(409, str(exc))
         except ValueError as exc:

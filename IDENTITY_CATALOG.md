@@ -53,9 +53,9 @@ transactional; old SQLite databases require a separate reviewed migration.
 Setup accepts `tenantId`, `orgName`, `adminName`, `adminEmail`, `adminPassword`
 (minimum eight characters). Existing tenant setup returns 409 and cannot replace
 an administrator. Login accepts `tenantId`, `email`, `password` and returns
-`token`. Both endpoints also have `/api/auth/...` aliases. Registration is open
-for new tenant IDs, matching the existing setup flow; deployment-level signup
-restrictions and login rate limits are follow-up work.
+`token`. Both endpoints also have `/api/auth/...` aliases. Registration is now
+closed by default, with operator bootstrap, persistent rate limits, current-user
+permission checks and session revocation; see `SECURITY.md`.
 
 Pass `Authorization: Bearer TOKEN` to `/products`. The authenticated tenant owns
 all catalog operations; a conflicting `X-Tenant-ID` or `tenantId` query parameter
@@ -66,13 +66,13 @@ client product/variant/barcode shape.
 
 The database dependency no longer redirects models into unprovisioned tenant
 schemas or sets persistent connection-level tenant state. Explicit tenant scopes
-are implemented for the catalog. Other repositories and request-body tenant
-fields still need an ownership audit before multi-tenant release.
+are implemented for the mounted APIs. `SECURITY.md` covers the later ownership
+audit, forced PostgreSQL policies and explicit failures for unfinished features.
 
 Tests now use actual setup/login rather than globally mocking every request as an
 administrator. Follow-up work: serial variants and transfers,
-financial journal posting, count reconciliation, auth revocation,
-signup/login throttling, and PostgreSQL migration/integration checks.
+financial journal posting, count reconciliation and advanced identity features.
+Revocation, throttling and restricted-role PostgreSQL checks are now implemented.
 
 ## Verification (2026-10-11)
 

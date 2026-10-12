@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import text
 from fastapi import Header, Request, HTTPException, status
 import os
 
@@ -30,4 +31,6 @@ async def get_db_session(request: Request, x_tenant_id: str = Header(default=Non
     # Explicit row scopes are enforced by repositories. Do not redirect models
     # into unprovisioned schemas or leak a session setting through pooled connections.
     async with async_session() as session:
+        if user_tenant and session.bind.dialect.name == 'postgresql':
+            await session.execute(text("SELECT set_config('app.current_tenant_id', :tenant, true)"), {'tenant': user_tenant})
         yield session

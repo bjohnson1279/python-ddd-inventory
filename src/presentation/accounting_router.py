@@ -4,7 +4,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.database import get_db_session
 from src.infrastructure.auth.identity import current_tenant
-from src.infrastructure.auth.rbac import requires_roles
+from src.infrastructure.auth.rbac import requires_roles, requires_permissions
 from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
 from src.infrastructure.product.models import ProductModel
@@ -48,7 +48,7 @@ async def config(tenant_id: str, request: Request, session: AsyncSession = Depen
 
 
 @router.post('/tenant-config')
-@requires_roles(['ADMIN', 'MANAGER'])
+@requires_permissions(['accounting:write'])
 async def save_config(data: ConfigDTO, request: Request, session: AsyncSession = Depends(get_db_session)):
     tenant = current_tenant(request)
     if data.tenantId != tenant:
@@ -196,7 +196,7 @@ class PriceDTO(BaseModel):
 
 
 @router.post('/cost-layers/{layer_id}/price')
-@requires_roles(['ADMIN', 'MANAGER'])
+@requires_permissions(['accounting:write'])
 async def price_layer(layer_id: str, data: PriceDTO, request: Request,
                       session: AsyncSession = Depends(get_db_session)):
     tenant = current_tenant(request)
