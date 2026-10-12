@@ -6,7 +6,7 @@ from src.presentation.main import app
 @pytest_asyncio.fixture
 async def async_client(client): # Depends on conftest 'client' fixture which sets up db
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url='http://test') as ac:
+    async with AsyncClient(transport=transport, base_url='http://test', headers=dict(client.headers)) as ac:
         yield ac
 
 @pytest.mark.asyncio

@@ -1,6 +1,8 @@
 import os
 os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///:memory:'
 os.environ['REDIS_URL'] = 'redis://localhost:6379/0'
+os.environ['JWT_SECRET'] = 'python-test-secret-do-not-use-in-production'
+os.environ['OTEL_SDK_DISABLED'] = 'true'
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
@@ -35,10 +37,18 @@ async def client(db_session):
 
     app.dependency_overrides[get_db_session] = override_get_db_session
 
-    from unittest.mock import patch
-    with patch("src.infrastructure.auth.rbac.get_current_user_roles", return_value=["ADMIN", "MANAGER", "USER"]):
-        with TestClient(app) as test_client:
-            yield test_client
+    with TestClient(app) as test_client:
+        setup = test_client.post('/auth/setup', json={
+            'tenantId': 'tenant-1', 'orgName': 'Test Store', 'adminName': 'Admin',
+            'adminEmail': 'admin@example.com', 'adminPassword': 'test-password',
+        })
+        assert setup.status_code == 201, setup.text
+        login = test_client.post('/auth/login', json={
+            'tenantId': 'tenant-1', 'email': 'admin@example.com', 'password': 'test-password',
+        })
+        assert login.status_code == 200, login.text
+        test_client.headers['Authorization'] = 'Bearer ' + login.json()['token']
+        yield test_client
 
     app.dependency_overrides.clear()
 

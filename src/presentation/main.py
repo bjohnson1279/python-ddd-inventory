@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from src.infrastructure.auth.identity import jwt_secret
+    jwt_secret()
     # Setup/teardown events can go here. 
     # Skipping Base.metadata.create_all as migrations should handle it in production.
     yield
@@ -16,6 +18,54 @@ from src.infrastructure.telemetry import setup_telemetry
 from src.presentation.graphql import graphql_app
 
 app = FastAPI(title='Python DDD Inventory API', lifespan=lifespan)
+import os
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(CORSMiddleware,
+    allow_origins=[origin.strip() for origin in os.getenv(
+        'CORS_ORIGINS', 'http://localhost:3000,http://localhost:5173').split(',') if origin.strip()],
+    allow_methods=['GET', 'POST', 'OPTIONS'],
+    allow_headers=['Authorization', 'Content-Type', 'X-Tenant-ID'])
+
+from src.presentation.auth_router import router as auth_router
+from src.infrastructure.auth.identity import decode_token
+from fastapi.responses import JSONResponse
+import jwt
+
+app.include_router(auth_router)
+app.include_router(auth_router, prefix='/api')
+from src.presentation.stock_router import router as stock_router
+app.include_router(stock_router)
+app.include_router(stock_router, prefix='/api')
+from src.presentation.catalog_router import router as catalog_router
+app.include_router(catalog_router)
+app.include_router(catalog_router, prefix='/api')
+from src.presentation.accounting_router import router as accounting_router
+app.include_router(accounting_router)
+app.include_router(accounting_router, prefix='/api')
+
+@app.middleware('http')
+async def authenticate(request: Request, call_next):
+    authorization = request.headers.get('Authorization')
+    if authorization:
+        scheme, _, token = authorization.partition(' ')
+        try:
+            if scheme.lower() != 'bearer' or not token:
+                raise jwt.InvalidTokenError()
+            claims = decode_token(token)
+            if not isinstance(claims['tenantId'], str) or not claims['tenantId']:
+                raise jwt.InvalidTokenError()
+            if not isinstance(claims['roles'], list):
+                raise jwt.InvalidTokenError()
+        except jwt.InvalidTokenError:
+            return JSONResponse({'detail': 'Invalid or expired token'}, status_code=401)
+        request.state.tenant_id = claims['tenantId']
+        request.state.user_id = claims['sub']
+        request.state.roles = claims['roles']
+        request.state.permissions = claims.get('permissions', [])
+    supplied_tenant = request.headers.get('X-Tenant-ID') or request.query_params.get('tenantId')
+    if supplied_tenant and supplied_tenant != getattr(request.state, 'tenant_id', None):
+        return JSONResponse({'detail': 'Tenant ID mismatch'}, status_code=403)
+    return await call_next(request)
 
 # Setup Distributed Tracing & Observability
 setup_telemetry(app)

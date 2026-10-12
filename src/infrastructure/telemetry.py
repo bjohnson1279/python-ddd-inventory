@@ -1,4 +1,5 @@
 import logging
+import os
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
@@ -12,6 +13,8 @@ def setup_telemetry(app: FastAPI, service_name: str = "python-ddd-inventory"):
     """
     Integrates OpenTelemetry Distributed Tracing & Observability.
     """
+    if os.getenv('OTEL_SDK_DISABLED', '').lower() == 'true':
+        return
     logger.info(f"Setting up OpenTelemetry for {service_name}")
     
     resource = Resource(attributes={

@@ -7,6 +7,7 @@ from src.infrastructure.product.repository import SQLAlchemyProductRepository
 from src.application.product.services import ProductService
 from src.domain.product.exceptions import ProductNotFoundError, InvalidSKUError, InvalidPriceError
 from src.infrastructure.auth.rbac import requires_roles
+from src.infrastructure.auth.identity import current_tenant
 
 router = APIRouter(prefix='/products', tags=['products'])
 
@@ -23,8 +24,8 @@ class ProductResponseDTO(BaseModel):
     description: Optional[str]
     price_amount: str
 
-def get_product_service(session: AsyncSession = Depends(get_db_session)) -> ProductService:
-    repo = SQLAlchemyProductRepository(session)
+def get_product_service(request: Request, session: AsyncSession = Depends(get_db_session)) -> ProductService:
+    repo = SQLAlchemyProductRepository(session, current_tenant(request))
     return ProductService(repo)
 
 @router.post('', response_model=ProductResponseDTO, status_code=201)

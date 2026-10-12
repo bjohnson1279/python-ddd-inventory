@@ -54,3 +54,34 @@ jobs:
 
       - name: Run Pytest Suite
         run: pytest
+
+  costing-postgres:
+    name: PostgreSQL costing and migration contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: costing-test-only
+          POSTGRES_DB: costing_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d costing_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Verify migration, costing and concurrent writes
+        env:
+          COSTING_TEST_DATABASE_URL: postgresql+asyncpg://postgres:costing-test-only@127.0.0.1:5432/costing_test
+        run: pytest tests/infrastructure/test_costing_postgres.py -q --tb=short
