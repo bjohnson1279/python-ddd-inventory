@@ -90,8 +90,11 @@ Dedicated return creation/approval and write-off screens remain future work.
 
 These workflows record inventory/cost effects and references. They do not issue
 cash refunds, settle supplier credits, post financial journals or send vendor
-messages. Tax, foreign currencies and serial lifecycles remain outside this
-implementation. Named-unit write-offs and exact-value cost layers are now
+messages. Tax and foreign currencies remain outside this implementation.
+Identified serial returns/write-offs are now implemented separately in
+[serials and kits](SERIALS_KITS.md); generic RMAs remain quantity contracts.
+Virtual bundle component sales can use this RMA flow with their saved source
+cost layers. Named-unit write-offs and exact-value cost layers are now
 implemented in `TRANSFERS_UOM.md`; RMA lines remain integral base quantities.
 
 ## Verification

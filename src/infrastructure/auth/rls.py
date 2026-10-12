@@ -11,12 +11,23 @@ async def install_tenant_policies(conn):
               'python_suppliers', 'python_purchase_orders', 'python_procurement_actions',
               'python_reorder_policies', 'python_supplier_asns', 'python_returns',
               'python_return_actions', 'python_return_quarantine', 'python_stock_transfers',
-              'python_inventory_actions', 'python_uom_configs', 'python_outbox_streams']
+              'python_inventory_actions', 'python_uom_configs', 'python_outbox_streams',
+              'python_serial_tracking', 'python_serials', 'python_kits', 'python_kit_builds']
     quote = conn.dialect.identifier_preparer.quote
     predicate = "tenant_id = current_setting('app.current_tenant_id', true)"
     for table in tables:
         name = quote(table)
         row_predicate = predicate
+        if table in ('python_serial_tracking', 'python_serials', 'python_kits'):
+            row_predicate += f" AND EXISTS (SELECT 1 FROM products p WHERE p.sku = {table}.sku AND p.tenant_id = current_setting('app.current_tenant_id', true))"
+        if table == 'python_serials':
+            row_predicate += " AND EXISTS (SELECT 1 FROM products p WHERE p.id = python_serials.variant_id AND p.sku = python_serials.sku AND p.tenant_id = current_setting('app.current_tenant_id', true))"
+            row_predicate += " AND (layer_id IS NULL OR EXISTS (SELECT 1 FROM python_cost_layers l WHERE l.id = python_serials.layer_id AND l.sku = python_serials.sku AND l.tenant_id = current_setting('app.current_tenant_id', true)))"
+        if table == 'python_kits':
+            row_predicate += " AND NOT EXISTS (SELECT 1 FROM json_array_elements(python_kits.components) c WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.sku = c ->> 'sku' AND p.tenant_id = current_setting('app.current_tenant_id', true)))"
+        if table == 'python_kit_builds':
+            row_predicate += " AND EXISTS (SELECT 1 FROM python_kits k JOIN python_cost_layers l ON l.sku = k.sku WHERE k.id = python_kit_builds.kit_id AND l.id = python_kit_builds.layer_id AND k.tenant_id = current_setting('app.current_tenant_id', true) AND l.tenant_id = k.tenant_id)"
+            row_predicate += " AND NOT EXISTS (SELECT 1 FROM json_array_elements(python_kit_builds.components) c WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.sku = c ->> 'sku' AND p.tenant_id = current_setting('app.current_tenant_id', true)))"
         if table == 'python_uom_configs':
             row_predicate += " AND EXISTS (SELECT 1 FROM products p WHERE p.sku = python_uom_configs.sku AND p.tenant_id = current_setting('app.current_tenant_id', true))"
         if table == 'python_stock_transfers':

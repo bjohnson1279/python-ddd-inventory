@@ -32,7 +32,7 @@ class AttributeDTO(BaseModel):
 
 class VariantDTO(BaseModel):
     sku: str = Field(min_length=1, max_length=100)
-    trackingMode: Literal['quantity'] = 'quantity'
+    trackingMode: Literal['quantity', 'serial'] = 'quantity'
     attributes: list[AttributeDTO] = Field(default_factory=list, max_length=50)
 
 
@@ -66,12 +66,14 @@ async def catalog(request: Request, session: AsyncSession = Depends(get_db_sessi
             'source': row.source, 'isPrimary': row.is_primary, 'assignedAt': row.assigned_at.isoformat()})
     products = await session.scalars(select(ProductModel).where(ProductModel.tenant_id == tenant)
                                     .order_by(ProductModel.sku))
+    from src.infrastructure.serial_kit_models import TrackingModel
+    tracked = set(await session.scalars(select(TrackingModel.sku).where(TrackingModel.tenant_id == tenant)))
     for variant in products:
         link = links.get(variant.sku)
         product_id = link.product_id if link else variant.id
         result.setdefault(product_id, {'id': product_id, 'name': variant.name, 'variants': []})
         result[product_id]['variants'].append({'id': variant.id, 'sku': variant.sku,
-            'trackingMode': link.tracking_mode if link else 'quantity',
+            'trackingMode': 'serial' if variant.sku in tracked else 'quantity',
             'attributes': link.attributes if link else [], 'barcodes': barcodes.get(variant.sku, [])})
     return list(result.values())
 
@@ -106,6 +108,9 @@ async def add_variant(product_id: str, data: VariantDTO, request: Request,
         session.add(ProductModel(id=variant_id, tenant_id=tenant, sku=data.sku, name=parent.name,
                                  price_amount=0, created_at=now, updated_at=now))
         await session.flush()
+        if data.trackingMode == 'serial':
+            from src.application.tracking_service import enable_serial_tracking
+            await enable_serial_tracking(session, tenant, data.sku)
         session.add(VariantLinkModel(tenant_id=tenant, sku=data.sku, product_id=product_id,
             variant_id=variant_id, tracking_mode=data.trackingMode,
             attributes=[attribute.model_dump() for attribute in data.attributes]))

@@ -88,10 +88,10 @@ class ReturnService:
             cost = movement.request.get('unitCostCents')
             return po.supplier_id, [{'layerId': movement.result['costLayerId'], 'quantity': movement.amount,
                                     'costCents': cost * movement.amount if cost is not None else None}]
-        if movement.operation not in ('dispatch', 'fulfill-allocation'):
+        if movement.operation not in ('dispatch', 'fulfill-allocation', 'kit-sale-component'):
             raise StockConflict('Customer returns require a sale/fulfillment movement')
         entries = copy.deepcopy(movement.result.get('consumedLayers', []))
-        if not entries or sum(i['quantity'] for i in entries) != movement.amount:
+        if not entries or sum(i['quantity'] for i in entries) != abs(movement.amount):
             raise StockConflict('Historical sale has no complete returnable layer trace')
         if any('costCents' not in i for i in entries):
             total = movement.result.get('costOfGoodsSoldCents')

@@ -161,8 +161,25 @@ async def valuation_report(request: Request, locationId: str | None = None, meth
                         'costingMethod': configured, 'totalQuantity': 0, 'totalValueCents': 0, 'unitCostCents': 0}
                 row['inTransitQuantity'] = row.get('inTransitQuantity', 0) + item['quantity']
                 row['inTransitValueCents'] = row.get('inTransitValueCents', 0) + sum(batch['costCents'] for batch in item['batches'])
+        from src.infrastructure.serial_kit_models import SerialModel, TrackingModel
+        tracked = set(await session.scalars(select(TrackingModel.sku).where(TrackingModel.tenant_id == current_tenant(request))))
+        serial_query = select(SerialModel).where(SerialModel.tenant_id == current_tenant(request), SerialModel.status == 'transferred')
+        if locationId is not None:
+            serial_query = serial_query.where(SerialModel.destination_id == locationId)
+        for serial in await session.scalars(serial_query):
+            if serial.cost_cents is None:
+                raise HTTPException(409, 'Unpriced serialized stock in transit')
+            product = products.get(serial.sku)
+            if product is None:
+                raise HTTPException(409, 'Serial catalog reference is missing')
+            row = grouped.setdefault(serial.sku, {'variantId': product.id, 'sku': product.sku, 'name': product.name,
+                'totalQuantity': 0, 'totalValueCents': 0, 'unitCostCents': 0})
+            row['inTransitQuantity'] = row.get('inTransitQuantity', 0) + 1
+            row['inTransitValueCents'] = row.get('inTransitValueCents', 0) + serial.cost_cents
         rows = list(grouped.values())
         for row in rows:
+            if row['sku'] in tracked:
+                row['costingMethod'] = 'SPECIFIC_IDENTIFICATION'
             row.setdefault('inTransitQuantity', 0)
             row.setdefault('inTransitValueCents', 0)
             row['totalOwnedQuantity'] = row['totalQuantity'] + row['inTransitQuantity']
@@ -191,6 +208,10 @@ async def valuation(variant_id: str, request: Request, quantity: int | None = Qu
     row = next((row for row in rows if row['sku'] == product.sku), None)
     available = row['totalQuantity'] if row else 0
     requested = available if quantity is None else quantity
+    from src.infrastructure.serial_kit_models import TrackingModel
+    tracked = await session.scalar(select(TrackingModel.id).where(TrackingModel.tenant_id == tenant, TrackingModel.sku == product.sku))
+    if tracked and requested != available:
+        raise HTTPException(409, 'Partial serial valuation requires identified serials; trace the selected serial')
     if requested > available:
         raise HTTPException(400, 'Insufficient cost layers for valuation')
     total = row['totalValueCents'] if row else 0

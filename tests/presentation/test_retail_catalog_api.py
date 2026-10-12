@@ -29,7 +29,7 @@ async def test_catalog_failures_do_not_create_variants_or_change_primary_barcode
     client.post('/inventory/products', json={'id': 'item', 'name': 'Item'})
     assert client.post('/inventory/products/missing/variants', json={'sku': 'SKU-A'}).status_code == 404
     assert client.post('/inventory/products/item/variants', json={'sku': 'invalid sku'}).status_code == 400
-    assert client.post('/inventory/products/item/variants', json={'sku': 'SKU-A', 'trackingMode': 'serial'}).status_code == 422
+    assert client.post('/inventory/products/item/variants', json={'sku': 'SKU-A', 'trackingMode': 'lot'}).status_code == 422
     client.post('/inventory/products/item/variants', json={'sku': 'SKU-A'})
     barcode = {'sku': 'SKU-A', 'barcodeValue': 'primary', 'makePrimary': True}
     assert client.post('/barcodes/assign', json=barcode).status_code == 201
@@ -41,6 +41,20 @@ async def test_catalog_failures_do_not_create_variants_or_change_primary_barcode
     assert generated.status_code == 201
     assert generated.json()['barcodeValue'].startswith('INV-')
     assert generated.json()['symbology'] == 'Code128'
+
+
+@pytest.mark.asyncio
+async def test_serial_variant_creation_and_barcode_stock_guard(client):
+    assert client.post('/inventory/products', json={'id': 'electronics', 'name': 'Electronics'}).status_code == 201
+    created = client.post('/inventory/products/electronics/variants', json={'sku': 'DEVICE', 'trackingMode': 'serial'})
+    assert created.status_code == 201, created.text
+    assert client.get('/inventory/products').json()[0]['variants'][0]['trackingMode'] == 'serial'
+    assert client.post('/barcodes/assign', json={'sku': 'DEVICE', 'barcodeValue': 'device'}).status_code == 201
+    scan = client.post('/barcodes/scan', json={'barcodeValue': 'device', 'context': 'receiving', 'scannedAmount': 1})
+    assert scan.status_code == 400 and 'identified serial' in scan.json()['detail']
+    serial = client.post('/serials', json={'sku': 'DEVICE', 'serialNumber': 'DEVICE-1', 'mutationId': 'identity', 'reason': 'New device'})
+    assert serial.status_code == 201, serial.text
+    assert serial.json()['variantId'] == created.json()['id']
 
 
 @pytest.mark.asyncio

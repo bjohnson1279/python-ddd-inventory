@@ -109,9 +109,13 @@ and transfer items. No store database was migrated or service deployed.
 
 The Python client exposes transfer, UOM and named-unit stock methods with caller
 IDs/versions. Inventory rows show base-unit labels. Dedicated transfer/UOM panels,
-partial transfer receipt, transit losses, intercompany accounting, serials and
+partial transfer receipt, transit losses, intercompany accounting and
 automatic supplier-return lineage after relocation remain future work. Cancelled
 shipments restore new source layers while retaining the original transfer trace.
+
+Identified serial transfers are now implemented separately in
+[serials and kits](SERIALS_KITS.md). Quantity-only transfers reject serial SKUs;
+assembled kit transfers also require future manifest relocation support.
 
 ## Verification
 

@@ -89,6 +89,11 @@ class InventoryWorkflow:
         items = []
         for item in data['items']:
             await owned_product(self.session, self.tenant, item['sku'])
+            from src.application.tracking_service import require_quantity_tracking
+            from src.infrastructure.serial_kit_models import KitModel
+            await require_quantity_tracking(self.session, self.tenant, item['sku'])
+            if await self.session.scalar(select(KitModel.id).where(KitModel.tenant_id == self.tenant, KitModel.sku == item['sku'])):
+                raise ValueError('Assembled kit transfers require manifest relocation support')
             unit, quantity = item.get('unit'), item['quantity']
             conversion = {}
             if unit:
@@ -137,6 +142,7 @@ class InventoryWorkflow:
 
     async def receive_batches(self, stock, batches):
         layers = await load_layers(self.session, self.tenant, stock)
+        created = []
         for batch in batches:
             for quantity, cost in cost_groups(batch['quantity'], batch['costCents']):
                 layer = CostLayerModel(id=str(uuid.uuid4()), tenant_id=self.tenant, stock_id=stock.id,
@@ -147,10 +153,12 @@ class InventoryWorkflow:
                     received_at=datetime.fromisoformat(batch['receivedAt']), quarantined=False)
                 self.session.add(layer)
                 layers.append(layer)
+                created.append(layer.id)
         total = sum(layer.remaining_value_cents or 0 for layer in layers)
         validate_total_value(total)
         if self.config.costing_method == 'WAC' and all(l.remaining_value_cents is not None for l in layers if l.remaining_quantity):
             redistribute_value(layers, total)
+        return created
 
     async def transition_transfer(self, data, key):
         row = await self.owned_transfer(data['transferId'])

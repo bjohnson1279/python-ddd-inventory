@@ -36,6 +36,11 @@ async def convert_input(session, tenant, sku, amount, unit, expected_version):
 
 async def save_uom(session, tenant, data):
     await owned_product(session, tenant, data['sku'])
+    from src.application.tracking_service import require_quantity_tracking
+    await require_quantity_tracking(session, tenant, data['sku'])
+    from src.infrastructure.serial_kit_models import KitModel
+    if (data['category'] != 'discrete' or data['baseUnit'] != 'ea') and await session.scalar(select(KitModel.id).where(KitModel.tenant_id == tenant, KitModel.sku == data['sku'])):
+        raise ValueError('Kit output must retain discrete eaches')
     row = await configured(session, tenant, data['sku'])
     if data['expectedVersion'] != (row.version if row else 0):
         raise StockConflict('UOM configuration version conflict')

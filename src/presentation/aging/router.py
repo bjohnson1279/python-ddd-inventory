@@ -22,7 +22,9 @@ async def analyze_sku_aging(sku: str, request: Request, location_id: str, tenant
         raise HTTPException(404, 'Stock not found')
     movements = await session.scalars(select(StockMovementModel).where(StockMovementModel.tenant_id == tenant,
         StockMovementModel.sku == sku, StockMovementModel.location_id == location_id,
-        StockMovementModel.operation.in_(['receive', 'dispatch', 'fulfill-allocation'])))
+        StockMovementModel.operation.in_(['receive', 'dispatch', 'fulfill-allocation',
+            'serial-receive', 'serial-sell', 'serial-return', 'serial-transfer', 'serial-write-off',
+            'kit-assemble', 'kit-assemble-component', 'kit-disassemble', 'kit-disassemble-component', 'kit-sale-component'])))
     entries = [{'quantity': movement.amount, 'occurred_at': utc(movement.occurred_at)} for movement in movements]
     layers = list(await session.scalars(select(CostLayerModel).where(CostLayerModel.tenant_id == tenant,
         CostLayerModel.stock_id == stock.id, CostLayerModel.remaining_quantity > 0)))

@@ -116,6 +116,15 @@ versioned retries and sanitized delivery errors are implemented in
 
 ## Verification and remaining work
 
+Serial registration/formula management require manager/admin permissions;
+operators can perform serial and kit operations with cost redaction. Serial
+pricing requires accounting permission, and serial write-offs require the
+existing returns permission. Command IDs are actor-bound, owned identities are
+checked before replay and stale versions fail without partial stock changes.
+Four new tables have forced PostgreSQL policies with owned product, variant,
+cost-layer, kit and manifest-component checks. See
+[serials and kits](SERIALS_KITS.md) for workflows and concurrency/RLS verification.
+
 Transfer commands and UOM configurations now have explicit permissions and
 actor-bound retries. Operators can move goods but nested transfer cost snapshots
 are redacted; only managers/admins configure units. Forced PostgreSQL policies

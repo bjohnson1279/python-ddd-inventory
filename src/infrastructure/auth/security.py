@@ -20,8 +20,10 @@ PERMISSIONS = {
     'returns:read', 'returns:write',
     'transfers:read', 'transfers:write', 'uom:read', 'uom:write',
     'outbox:read', 'outbox:manage',
+    'serials:read', 'serials:write', 'serials:configure', 'kits:read', 'kits:write', 'kits:configure',
 }
 READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read', 'returns:read', 'transfers:read', 'uom:read'}
+READ |= {'serials:read', 'kits:read'}
 ROLE_PERMISSIONS = {
     'ADMIN': PERMISSIONS - {'supplier:portal'},
     'MANAGER': PERMISSIONS - {'users:manage', 'supplier:portal'},
@@ -31,6 +33,7 @@ ROLE_PERMISSIONS = {
     'ACCOUNTANT': READ | {'accounting:write'},
     'SUPPLIER_USER': {'identity:self', 'supplier:portal'},
 }
+ROLE_PERMISSIONS['WAREHOUSE_OPERATOR'] |= {'serials:read', 'serials:write', 'kits:read', 'kits:write'}
 PUBLIC = {('GET', '/health'), ('GET', '/api/health'), ('POST', '/auth/setup'), ('POST', '/auth/login'),
           ('POST', '/api/auth/setup'), ('POST', '/api/auth/login'),
           ('POST', '/webhooks/shopify/orders/create'), ('POST', '/webhooks/woocommerce/orders/create'),
@@ -57,6 +60,16 @@ def permission_for(path, method):
         return 'identity:self'
     if path.startswith('/outbox'):
         return 'outbox:read' if read else 'outbox:manage'
+    if path.startswith('/serials'):
+        if path.endswith('/price'):
+            return 'accounting:write'
+        if path == '/serials' and not read:
+            return 'serials:configure'
+        if path.endswith('/write-off'):
+            return 'returns:write'
+        return 'serials:read' if read else 'serials:write'
+    if path.startswith('/kits'):
+        return 'kits:read' if read else 'kits:configure' if path == '/kits' else 'kits:write'
     if path.startswith('/supplier-portal'):
         return 'supplier:portal'
     if path.startswith('/inventory/transfers'):

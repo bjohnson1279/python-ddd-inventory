@@ -3,8 +3,8 @@
 This first implementation slice provides persisted tenant/admin setup, password
 hashing, one-hour HS256 access tokens, role-populated request identity and tenant
 catalog isolation, quantity variants, barcode assignment/scanning and stock
-operations. Serial tracking
-remain unfinished.
+operations. Serial tracking and quantity kits are now implemented; see
+[serials and kits](SERIALS_KITS.md).
 Lot-backed costing and valuation have since been implemented; see `COSTING.md`
 for methods, receipt fields, opening-stock pricing and migration instructions.
 
@@ -71,8 +71,9 @@ are implemented for the mounted APIs. `SECURITY.md` covers the later ownership
 audit, forced PostgreSQL policies and explicit failures for unfinished features.
 
 Tests now use actual setup/login rather than globally mocking every request as an
-administrator. Follow-up work: serial variants,
-financial journal posting and advanced identity features. Reviewed count
+administrator. Serial variants now have identified stock/lifecycle commands in
+`SERIALS_KITS.md`. Follow-up work includes financial journal posting and advanced
+identity features. Reviewed count
 reconciliation and offline submissions are now implemented; see `COUNTS.md`.
 Revocation, throttling and restricted-role PostgreSQL checks are now implemented.
 
@@ -94,7 +95,7 @@ lifespan/test-client/time handling.
 
 No database migration was applied to a running store, and no commit or deployment
 was made in that first slice. Costing and valuation are now implemented. Remaining
-parity work includes serials. Procurement and replenishment are
+parity work includes financial journals and downstream integrations. Procurement and replenishment are
 now implemented as described in `PROCUREMENT.md`. Physical counts now
 reconcile through explicit manager approval as described in `COUNTS.md`.
 Customer/supplier returns, quarantine decisions and inventory write-offs are now

@@ -24,6 +24,8 @@ async def locked_config(session, tenant):
 
 
 async def load_layers(session, tenant, stock):
+    from src.application.tracking_service import require_quantity_tracking
+    await require_quantity_tracking(session, tenant, stock.sku)
     layers = list(await session.scalars(select(CostLayerModel).where(
         CostLayerModel.tenant_id == tenant, CostLayerModel.stock_id == stock.id).order_by(CostLayerModel.id)))
     layered = sum(layer.remaining_quantity for layer in layers)

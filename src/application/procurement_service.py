@@ -237,12 +237,19 @@ class ProcurementService:
                              utc(datetime.fromisoformat(batch['expirationDate'])) > datetime.now(timezone.utc))
                 key = (item['sku'], transfer.destination_location_id)
                 incoming[key] = incoming.get(key, 0) + usable
+        from src.infrastructure.serial_kit_models import SerialModel
+        serial_transit = select(SerialModel, CostLayerModel.expiration_date).join(CostLayerModel, CostLayerModel.id == SerialModel.layer_id).where(
+            SerialModel.tenant_id == self.tenant, CostLayerModel.tenant_id == self.tenant, SerialModel.status == 'transferred')
+        for serial, expiry in (await self.session.execute(serial_transit)).all():
+            if expiry is None or utc(expiry) > datetime.now(timezone.utc):
+                key = (serial.sku, serial.destination_id)
+                incoming[key] = incoming.get(key, 0) + 1
         sold = {}
         for movement in await self.session.scalars(select(StockMovementModel).where(
-            StockMovementModel.tenant_id == self.tenant, StockMovementModel.operation.in_(('dispatch', 'fulfill-allocation')),
+            StockMovementModel.tenant_id == self.tenant, StockMovementModel.operation.in_(('dispatch', 'fulfill-allocation', 'serial-sell', 'kit-sale-component')),
             StockMovementModel.occurred_at >= cutoff)):
             key = (movement.sku, movement.location_id)
-            sold[key] = sold.get(key, 0) + movement.amount
+            sold[key] = sold.get(key, 0) + abs(movement.amount)
         suppliers = {s.id: s for s in await self.session.scalars(select(Supplier).where(Supplier.tenant_id == self.tenant))}
         unusable = {}
         now = datetime.now(timezone.utc)
