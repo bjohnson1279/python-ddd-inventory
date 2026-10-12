@@ -89,8 +89,11 @@ network responses; a deterministic conflict clears it for a fresh version.
 Dedicated return creation/approval and write-off screens remain future work.
 
 These workflows record inventory/cost effects and references. They do not issue
-cash refunds, settle supplier credits, post financial journals or send vendor
-messages. Tax and foreign currencies remain outside this implementation.
+cash refunds or send vendor messages on their own. Financial cost postings,
+confirmed customer/supplier credits and actual cash refund records are now
+implemented in [financial accounting](FINANCIAL_ACCOUNTING.md). The money
+workflow requires explicit commercial amounts and confirmation; it does not
+initiate bank transfers. Tax and foreign currencies remain outside this implementation.
 Identified serial returns/write-offs are now implemented separately in
 [serials and kits](SERIALS_KITS.md); generic RMAs remain quantity contracts.
 Virtual bundle component sales can use this RMA flow with their saved source

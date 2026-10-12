@@ -12,12 +12,32 @@ async def install_tenant_policies(conn):
               'python_reorder_policies', 'python_supplier_asns', 'python_returns',
               'python_return_actions', 'python_return_quarantine', 'python_stock_transfers',
               'python_inventory_actions', 'python_uom_configs', 'python_outbox_streams',
-              'python_serial_tracking', 'python_serials', 'python_kits', 'python_kit_builds']
+              'python_serial_tracking', 'python_serials', 'python_kits', 'python_kit_builds',
+              'python_ledger_state', 'python_journals', 'python_journal_lines', 'python_financial_sources',
+              'python_financial_documents', 'python_document_sources', 'python_financial_settlements', 'python_financial_credits']
     quote = conn.dialect.identifier_preparer.quote
     predicate = "tenant_id = current_setting('app.current_tenant_id', true)"
     for table in tables:
         name = quote(table)
         row_predicate = predicate
+        if table == 'python_journals':
+            row_predicate += " AND (source_id IS NULL OR EXISTS (SELECT 1 FROM python_stock_movements m WHERE m.id = python_journals.source_id AND m.tenant_id = current_setting('app.current_tenant_id', true)))"
+        if table == 'python_journal_lines':
+            row_predicate += " AND EXISTS (SELECT 1 FROM python_journals j WHERE j.id = journal_id AND j.tenant_id = current_setting('app.current_tenant_id', true))"
+        if table == 'python_financial_sources':
+            row_predicate += " AND EXISTS (SELECT 1 FROM python_stock_movements m WHERE m.id = movement_id AND m.tenant_id = current_setting('app.current_tenant_id', true))"
+            row_predicate += " AND (journal_id IS NULL OR EXISTS (SELECT 1 FROM python_journals j WHERE j.id = python_financial_sources.journal_id AND j.source_id = python_financial_sources.movement_id AND j.tenant_id = current_setting('app.current_tenant_id', true)))"
+        if table == 'python_financial_documents':
+            row_predicate += " AND (supplier_id IS NULL OR EXISTS (SELECT 1 FROM python_suppliers s WHERE s.id = supplier_id AND s.tenant_id = current_setting('app.current_tenant_id', true)))"
+            row_predicate += " AND (journal_id IS NULL OR EXISTS (SELECT 1 FROM python_journals j WHERE j.id = python_financial_documents.journal_id AND j.reference_id = python_financial_documents.id AND j.tenant_id = current_setting('app.current_tenant_id', true)))"
+        if table in ('python_document_sources', 'python_financial_settlements', 'python_financial_credits'):
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_financial_documents d WHERE d.id = {table}.document_id AND d.tenant_id = current_setting('app.current_tenant_id', true))"
+        if table in ('python_document_sources', 'python_financial_credits'):
+            row_predicate += " AND EXISTS (SELECT 1 FROM python_financial_sources s WHERE s.movement_id = source_id AND s.tenant_id = current_setting('app.current_tenant_id', true))"
+        if table == 'python_financial_settlements':
+            row_predicate += " AND EXISTS (SELECT 1 FROM python_journals j WHERE j.id = python_financial_settlements.journal_id AND j.kind IN ('SETTLEMENT','REFUND') AND j.reference_id = python_financial_settlements.reference AND j.tenant_id = current_setting('app.current_tenant_id', true))"
+        if table == 'python_financial_credits':
+            row_predicate += " AND (journal_id IS NULL OR EXISTS (SELECT 1 FROM python_journals j WHERE j.id=python_financial_credits.journal_id AND j.kind='CREDIT' AND j.reference_id=python_financial_credits.reference AND j.tenant_id=current_setting('app.current_tenant_id', true)))"
         if table in ('python_serial_tracking', 'python_serials', 'python_kits'):
             row_predicate += f" AND EXISTS (SELECT 1 FROM products p WHERE p.sku = {table}.sku AND p.tenant_id = current_setting('app.current_tenant_id', true))"
         if table == 'python_serials':

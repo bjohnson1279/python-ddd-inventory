@@ -18,6 +18,7 @@ from src.infrastructure.product.models import ProductModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
 from src.infrastructure.messaging.models import OutboxEventModel, OutboxStreamModel, allocate_sequence
 from src.infrastructure.serial_kit_models import TrackingModel, SerialModel, KitModel, KitBuildModel
+from src.infrastructure.financial_models import LedgerStateModel, JournalModel, JournalLineModel, FinancialSourceModel, FinancialDocumentModel, DocumentSourceModel, SettlementModel, FinancialCreditModel
 from src.infrastructure.catalog_models import CatalogModel, VariantLinkModel, BarcodeModel
 from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 from src.infrastructure.procurement_models import SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel
@@ -32,7 +33,9 @@ async def create_related(conn):
                   SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel,
                   ReturnModel, ReturnActionModel, QuarantineModel,
                   TransferModel, InventoryActionModel, UomConfigModel,
-                  TrackingModel, SerialModel, KitModel, KitBuildModel):
+                  TrackingModel, SerialModel, KitModel, KitBuildModel,
+                  LedgerStateModel, JournalModel, JournalLineModel, FinancialSourceModel,
+                  FinancialDocumentModel, DocumentSourceModel, SettlementModel, FinancialCreditModel):
         await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
     upgrades = {
         'outbox_events': {'status': "VARCHAR NOT NULL DEFAULT 'PENDING'",

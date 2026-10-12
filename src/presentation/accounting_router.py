@@ -56,6 +56,10 @@ async def save_config(data: ConfigDTO, request: Request, session: AsyncSession =
         raise HTTPException(403, 'Tenant ID mismatch')
     try:
         config = await locked_config(session, tenant)
+        from src.infrastructure.financial_models import LedgerStateModel
+        ledger = await session.get(LedgerStateModel, tenant)
+        if ledger and ledger.active and ledger.method != data.accountingMethod:
+            raise HTTPException(409, 'Active financial accounting method is pinned; an explicit accounting migration is required')
         if config.costing_method != data.costingMethod:
             stocked = await session.scalar(select(StockModel.id).where(
                 StockModel.tenant_id == tenant, StockModel.quantity > 0).limit(1))

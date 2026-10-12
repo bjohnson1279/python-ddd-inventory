@@ -76,6 +76,9 @@ app.include_router(outbox_router, prefix='/api')
 from src.presentation.serial_kit_router import router as serial_kit_router
 app.include_router(serial_kit_router)
 app.include_router(serial_kit_router, prefix='/api')
+from src.presentation.financial_router import router as financial_router
+app.include_router(financial_router)
+app.include_router(financial_router, prefix='/api')
 from src.presentation.catalog_router import router as catalog_router
 app.include_router(catalog_router)
 app.include_router(catalog_router, prefix='/api')

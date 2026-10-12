@@ -124,8 +124,9 @@ Managers/admins define formulas; warehouse operators can assemble, disassemble
 and sell bundles. Costs are redacted for non-accounting roles. Assembled-kit
 location transfers require manifest relocation support and are explicitly
 rejected by the generic transfer workflow. Nested/serial kits, manufacturing
-labor/overhead, partial-unit disassembly and financial journal posting remain
-outside this implementation.
+labor/overhead and partial-unit disassembly remain outside this implementation.
+Financial cost journals, matched commercial documents and confirmed credit/refund
+records are now implemented in [financial accounting](FINANCIAL_ACCOUNTING.md).
 
 ## Persistence, client and verification
 

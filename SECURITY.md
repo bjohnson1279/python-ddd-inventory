@@ -116,6 +116,15 @@ versioned retries and sanitized delivery errors are implemented in
 
 ## Verification and remaining work
 
+Financial read/write/management permissions are limited to administrators,
+managers and accountants. Warehouse stock commands can produce their automatic
+cost journals but cannot read financial sources, journals or commercial cash
+records. Financial commands use actor-bound retries and owned-parent lookups
+before replay. PostgreSQL forces policies on all financial tables; SQLite and
+PostgreSQL also enforce immutable posted headers/lines and snapshot consistency.
+See [financial accounting](FINANCIAL_ACCOUNTING.md) for activation, source review,
+closing rules and database verification.
+
 Serial registration/formula management require manager/admin permissions;
 operators can perform serial and kit operations with cost redaction. Serial
 pricing requires accounting permission, and serial write-offs require the

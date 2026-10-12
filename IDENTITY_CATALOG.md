@@ -72,8 +72,8 @@ audit, forced PostgreSQL policies and explicit failures for unfinished features.
 
 Tests now use actual setup/login rather than globally mocking every request as an
 administrator. Serial variants now have identified stock/lifecycle commands in
-`SERIALS_KITS.md`. Follow-up work includes financial journal posting and advanced
-identity features. Reviewed count
+`SERIALS_KITS.md`. Financial journal posting is now implemented in
+`FINANCIAL_ACCOUNTING.md`; advanced identity features remain follow-up work. Reviewed count
 reconciliation and offline submissions are now implemented; see `COUNTS.md`.
 Revocation, throttling and restricted-role PostgreSQL checks are now implemented.
 
@@ -95,7 +95,7 @@ lifespan/test-client/time handling.
 
 No database migration was applied to a running store, and no commit or deployment
 was made in that first slice. Costing and valuation are now implemented. Remaining
-parity work includes financial journals and downstream integrations. Procurement and replenishment are
+parity work includes downstream integrations and durable report jobs. Procurement and replenishment are
 now implemented as described in `PROCUREMENT.md`. Physical counts now
 reconcile through explicit manager approval as described in `COUNTS.md`.
 Customer/supplier returns, quarantine decisions and inventory write-offs are now

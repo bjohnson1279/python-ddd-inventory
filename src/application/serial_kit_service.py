@@ -108,7 +108,7 @@ class SerialKitWorkflow(InventoryWorkflow):
             raise ValueError('Location is only supported for receiving or returns')
         if data.get('unitCostCents') is not None and action != 'price' and not (old == 'pending' and action in ('receive', 'quarantine')):
             raise ValueError('Cost metadata is only supported for initial receiving or explicit pricing')
-        details = {'operation': 'serial-' + action, 'serialNumber': row.serial_number, 'costOfGoodsSoldCents': 0}
+        details = {'operation': 'serial-' + action, 'serialNumber': row.serial_number, 'fromStatus': old, 'costOfGoodsSoldCents': 0}
         if action == 'price':
             if old not in ('in_stock', 'returned', 'quarantined', 'damaged') or row.cost_cents is not None or data.get('unitCostCents') is None:
                 raise StockConflict('Only an unpriced serial physically on hand can be priced')
@@ -161,6 +161,8 @@ class SerialKitWorkflow(InventoryWorkflow):
                 row.location_id, row.destination_id = location, None
                 if old == 'sold':
                     details['cogsReversedCents'] = row.cost_cents
+                    details['sourceLayerId'] = original.id
+                details.update(receiptValueCents=row.cost_cents, costLayerId=layer.id)
                 await self.serial_record(stock, 1, 0, key, details)
             elif old != 'pending':
                 stock = await self.stock(row.sku, row.location_id)
@@ -174,6 +176,7 @@ class SerialKitWorkflow(InventoryWorkflow):
                     raise ValueError('Transfer requires another destination and an unreserved serial')
                 allocation = -1 if row.reservation else 0
                 if target in ('sold', 'written_off', 'transferred'):
+                    details['sourceCostLayerId'] = layer.id
                     row.cost_cents = layer.remaining_value_cents
                     layer.remaining_quantity, layer.remaining_value_cents = 0, 0
                     delta = -1
@@ -182,6 +185,7 @@ class SerialKitWorkflow(InventoryWorkflow):
                         details['inventoryValueChangeCents'] = -row.cost_cents if row.cost_cents is not None else None
                     if target == 'transferred':
                         row.destination_id = data['destinationId']
+                        details['transferredValueCents'] = row.cost_cents
                 else:
                     delta = 0
                     layer.quarantined = target != 'in_stock'
@@ -257,7 +261,7 @@ class SerialKitWorkflow(InventoryWorkflow):
                     stock = await self.stock(component['sku'], location, create=True)
                     batch = {**component, 'costCents': cost}
                     await self.receive_batches(stock, [batch])
-                    await self.record(stock, component['quantity'], 'kit-disassemble-component', key + ':' + build.id + ':' + str(index), {'kitSku': row.sku})
+                    await self.record(stock, component['quantity'], 'kit-disassemble-component', key + ':' + build.id + ':' + str(index), {'kitSku': row.sku, 'carryingValueCents': cost})
                     restored.append(batch)
                 build.disassembled = True
             await self.record(output, -quantity, 'kit-disassemble', key, {'carryingValueCents': total})

@@ -32,8 +32,10 @@ The tenant-level write lock serializes method changes with stock mutations.
 Changing the costing method is rejected while any tenant stock is on hand;
 existing stock is not silently reinterpreted. In-transit stock also blocks a
 method change. Accounting-method settings are
-stored for shared-client compatibility. Cash/accrual financial journal posting,
-taxes, foreign currencies and financial writeoff journals are separate work.
+stored for shared-client compatibility. Inventory journals, commercial amounts,
+cash/accrual settlement timing and financial write-offs are now implemented in
+[financial accounting](FINANCIAL_ACCOUNTING.md). Taxes and foreign currencies
+remain additional work.
 Original-cost returns and inventory write-offs are implemented in `RETURNS.md`.
 Reviewed physical counts adjust carrying value through `COUNTS.md`.
 
