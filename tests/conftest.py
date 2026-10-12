@@ -4,6 +4,7 @@ os.environ['REDIS_URL'] = 'redis://localhost:6379/0'
 os.environ['JWT_SECRET'] = 'python-test-secret-do-not-use-in-production'
 os.environ['OTEL_SDK_DISABLED'] = 'true'
 os.environ['ALLOW_PUBLIC_SIGNUP'] = 'true'
+os.environ['OUTBOX_ENABLED'] = 'false'
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient

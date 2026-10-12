@@ -16,7 +16,7 @@ from src.infrastructure.owned_feature_models import ReportDefinitionModel, Notif
 from src.infrastructure.cycle_count.models import CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel, CountRequestModel
 from src.infrastructure.product.models import ProductModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
-from src.infrastructure.messaging.models import OutboxEventModel
+from src.infrastructure.messaging.models import OutboxEventModel, OutboxStreamModel, allocate_sequence
 from src.infrastructure.catalog_models import CatalogModel, VariantLinkModel, BarcodeModel
 from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 from src.infrastructure.procurement_models import SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel
@@ -25,7 +25,7 @@ from src.infrastructure.transfer_models import TransferModel, InventoryActionMod
 
 
 async def create_related(conn):
-    for model in (StockModel, StockMovementModel, OutboxEventModel, CatalogModel, VariantLinkModel, BarcodeModel,
+    for model in (StockModel, StockMovementModel, OutboxStreamModel, OutboxEventModel, CatalogModel, VariantLinkModel, BarcodeModel,
                   AccountingConfigModel, CostLayerModel, ReportDefinitionModel, NotificationModel,
                   CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel, CountRequestModel,
                   SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel,
@@ -33,6 +33,11 @@ async def create_related(conn):
                   TransferModel, InventoryActionModel, UomConfigModel):
         await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
     upgrades = {
+        'outbox_events': {'status': "VARCHAR NOT NULL DEFAULT 'PENDING'",
+            'attempts': 'INTEGER NOT NULL DEFAULT 0', 'cycle_attempts': 'INTEGER NOT NULL DEFAULT 0',
+            'version': 'INTEGER NOT NULL DEFAULT 0', 'next_attempt_at': 'TIMESTAMP',
+            'lease_token': 'VARCHAR', 'lease_expires_at': 'TIMESTAMP', 'last_attempt_at': 'TIMESTAMP',
+            'last_error': 'VARCHAR', 'published_at': 'TIMESTAMP', 'stream_key': 'VARCHAR', 'sequence': 'BIGINT'},
         'python_cost_layers': {'initial_value_cents': 'BIGINT'},
         'cycle_count_records': {'location_id': 'VARCHAR', 'revision': 'INTEGER NOT NULL DEFAULT 0',
                                'approved_by': 'VARCHAR', 'approval_result': 'JSON'},
@@ -42,9 +47,33 @@ async def create_related(conn):
         columns = {c['name'] for c in await conn.run_sync(lambda sync: inspect(sync).get_columns(table))}
         for name, ddl in additions.items():
             if name not in columns:
+                if table == 'outbox_events' and conn.dialect.name == 'postgresql' and ddl == 'TIMESTAMP':
+                    ddl = 'TIMESTAMP WITH TIME ZONE'
                 await conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}'))
     if conn.dialect.name == 'postgresql':
         await conn.execute(text('ALTER TABLE cycle_count_line_items ALTER COLUMN variance_value TYPE BIGINT'))
+        columns = await conn.run_sync(lambda sync: inspect(sync).get_columns('outbox_events'))
+        created_type = next(c['type'] for c in columns if c['name'] == 'created_at')
+        if not getattr(created_type, 'timezone', False):
+            await conn.execute(text("ALTER TABLE outbox_events ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE USING created_at AT TIME ZONE 'UTC'"))
+        valid_tenant = "json_typeof(payload -> 'tenantId') = 'string' AND EXISTS (SELECT 1 FROM python_tenants t WHERE t.id = payload ->> 'tenantId')"
+    else:
+        valid_tenant = "CASE WHEN json_valid(payload) THEN json_type(payload, '$.tenantId') = 'text' AND EXISTS (SELECT 1 FROM python_tenants t WHERE t.id = json_extract(payload, '$.tenantId')) ELSE 0 END"
+    # Preserve unassigned legacy records; never guess which store owns them.
+    await conn.execute(text(f"UPDATE outbox_events SET status='DEAD_LETTER', last_error='UnassignedLegacyEvent' WHERE status <> 'PUBLISHED' AND NOT coalesce(({valid_tenant}), false)"))
+    await conn.execute(text("UPDATE outbox_events SET status='DEAD_LETTER', last_error='InvalidLegacyTimestamp' WHERE status <> 'PUBLISHED' AND created_at IS NULL"))
+    legacy_events = (await conn.execute(select(OutboxEventModel.__table__).where(OutboxEventModel.sequence.is_(None), text(valid_tenant))
+        .order_by(OutboxEventModel.created_at.asc().nulls_first(), OutboxEventModel.id))).mappings().all()
+    tenants = set(await conn.scalars(select(TenantModel.id)))
+    for row in legacy_events:
+        payload = row['payload']
+        tenant = payload.get('tenantId') if isinstance(payload, dict) else None
+        if isinstance(tenant, str) and tenant in tenants and row['aggregate_type'] and row['aggregate_id']:
+            key, sequence = await conn.run_sync(lambda sync, t=tenant, r=row: allocate_sequence(sync, t, r['aggregate_type'], r['aggregate_id']))
+            await conn.execute(OutboxEventModel.__table__.update().where(OutboxEventModel.id == row['id'])
+                .values(stream_key=key, sequence=sequence))
+    for index in OutboxEventModel.__table__.indexes:
+        await conn.run_sync(lambda sync, item=index: item.create(sync, checkfirst=True))
     # Preserve opening quantities without guessing costs; safe on repeat runs.
     rows = await conn.execute(select(StockModel.__table__,
         func.coalesce(func.sum(CostLayerModel.remaining_quantity), 0).label('layered'))

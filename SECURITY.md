@@ -105,10 +105,14 @@ and when a privileged development database account bypasses RLS.
 
 Identity/login/rate tables support public credential verification and bootstrap,
 so their access remains explicitly scoped by the authentication/administrative
-services rather than these business-data RLS policies. Migrations and any future
-cross-tenant workers need deliberately provisioned privileged connections;
-ordinary runtime access without tenant context sees no outbox/business rows.
-The current outbox publisher/lifecycle remains unfinished.
+services rather than these business-data RLS policies. Migrations require a
+privileged connection; the event worker iterates the tenant registry and sets
+transaction-local tenant context using an ordinary non-BYPASSRLS runtime login.
+Ordinary runtime access without tenant context sees no outbox/business rows.
+Event stream counters also have forced tenant policies; event policies check
+owned stream parents. Admin/manager outbox read/retry permissions, actor-bound
+versioned retries and sanitized delivery errors are implemented in
+[event delivery](EVENT_DELIVERY.md).
 
 ## Verification and remaining work
 
@@ -116,7 +120,8 @@ Transfer commands and UOM configurations now have explicit permissions and
 actor-bound retries. Operators can move goods but nested transfer cost snapshots
 are redacted; only managers/admins configure units. Forced PostgreSQL policies
 scope all three new tables and enforce owned product links. See
-`TRANSFERS_UOM.md` for tests and the pending local PostgreSQL contract run.
+`TRANSFERS_UOM.md` for workflow tests. Its PostgreSQL contract has now passed
+against the disposable database used for event-delivery verification.
 
 Returns and write-offs require explicit read/write permissions. Their services
 verify owned source movements, purchase receipts and quarantine stock before
@@ -124,7 +129,8 @@ retry replay. Forced PostgreSQL policies additionally enforce those parent
 links. Customer return authorization caps quantities across requests, and
 write-offs preserve allocated goods. Non-accounting stock responses redact the
 new per-layer consumed `costCents` values. See `RETURNS.md` for workflow coverage
-and the pending local PostgreSQL verification of these new policies.
+and workflow coverage. These new PostgreSQL policies have now passed their
+dedicated contract against the disposable event-delivery test database.
 
 The full regression run passed 350 tests with the opt-in PostgreSQL scenario
 skipped in that run. Dedicated database runs separately passed both the existing

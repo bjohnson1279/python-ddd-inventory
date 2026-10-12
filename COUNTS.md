@@ -3,7 +3,8 @@
 Counts now reconcile quantity and carrying value through a manager-reviewed
 workflow. Stock, cost layers, movement history, count status, retry records and
 outbox enqueue commit together. This uses the existing tenant inventory write
-lock on SQLite and PostgreSQL; publication remains separate unfinished work.
+lock on SQLite and PostgreSQL. Asynchronous Kafka publication is now implemented
+through the leased worker described in [event delivery](EVENT_DELIVERY.md).
 
 ## Workflow
 

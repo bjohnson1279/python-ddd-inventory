@@ -104,11 +104,13 @@ rollback. Independent SQLite sessions prove duplicate receipt processing occurs
 once and competing receipts cannot exceed the remaining balance.
 
 The same concurrency contract includes an opt-in PostgreSQL restricted-role
-scenario and is wired into backend CI. Local PostgreSQL verification remains
-pending because the Docker daemon did not respond during this change. This is a
-targeted regression selection, not a whole-repository coverage measurement.
+scenario and is wired into backend CI. The previously pending local PostgreSQL
+contract now passed against the disposable event-delivery test database on
+2026-10-12. This is targeted regression evidence, not a whole-repository coverage
+measurement.
 
 The earlier client adapter run passed 14 tests. After adding the stale-decision
 retry case and supplier shipment method, TypeScript verification passed, but the
-final 15-test rerun could not start a Vitest worker in either pool. That final
-client regression run remains unverified.
+final 15-test rerun could not start a Vitest worker in either pool. That gap is
+now resolved: all 20 Python adapter tests, including return decision retries,
+passed during event-delivery verification, and TypeScript `--noEmit` passed.

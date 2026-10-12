@@ -11,7 +11,7 @@ async def install_tenant_policies(conn):
               'python_suppliers', 'python_purchase_orders', 'python_procurement_actions',
               'python_reorder_policies', 'python_supplier_asns', 'python_returns',
               'python_return_actions', 'python_return_quarantine', 'python_stock_transfers',
-              'python_inventory_actions', 'python_uom_configs']
+              'python_inventory_actions', 'python_uom_configs', 'python_outbox_streams']
     quote = conn.dialect.identifier_preparer.quote
     predicate = "tenant_id = current_setting('app.current_tenant_id', true)"
     for table in tables:
@@ -48,4 +48,5 @@ async def install_tenant_policies(conn):
     await conn.execute(text('ALTER TABLE outbox_events FORCE ROW LEVEL SECURITY'))
     await conn.execute(text('DROP POLICY IF EXISTS python_tenant_isolation ON outbox_events'))
     outbox_check = "payload ->> 'tenantId' = current_setting('app.current_tenant_id', true)"
+    outbox_check += " AND (stream_key IS NULL OR EXISTS (SELECT 1 FROM python_outbox_streams s WHERE s.key = outbox_events.stream_key AND s.tenant_id = current_setting('app.current_tenant_id', true) AND s.aggregate_type = outbox_events.aggregate_type AND s.aggregate_id = outbox_events.aggregate_id))"
     await conn.execute(text(f'CREATE POLICY python_tenant_isolation ON outbox_events USING ({outbox_check}) WITH CHECK ({outbox_check})'))

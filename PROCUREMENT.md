@@ -42,8 +42,9 @@ partially received order leaves its received stock/costs intact and stops the
 remaining balance from counting as incoming supply.
 
 `send` persists the issued state and enqueues an event. The application does not
-email a PO or contact a supplier; outbox publication/delivery remains separate
-unfinished work. No response claims successful remote delivery.
+email a PO or contact a supplier. Asynchronous Kafka publication is now
+implemented in [event delivery](EVENT_DELIVERY.md); supplier communication still
+requires a downstream consumer. No response claims successful remote delivery.
 
 ## Atomic receiving
 

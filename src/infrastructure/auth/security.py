@@ -19,6 +19,7 @@ PERMISSIONS = {
     'procurement:read', 'procurement:write',
     'returns:read', 'returns:write',
     'transfers:read', 'transfers:write', 'uom:read', 'uom:write',
+    'outbox:read', 'outbox:manage',
 }
 READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read', 'returns:read', 'transfers:read', 'uom:read'}
 ROLE_PERMISSIONS = {
@@ -54,6 +55,8 @@ def permission_for(path, method):
         return 'users:manage'
     if path.startswith('/auth/'):
         return 'identity:self'
+    if path.startswith('/outbox'):
+        return 'outbox:read' if read else 'outbox:manage'
     if path.startswith('/supplier-portal'):
         return 'supplier:portal'
     if path.startswith('/inventory/transfers'):

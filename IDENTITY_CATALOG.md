@@ -29,8 +29,9 @@ in the authenticated tenant. Stock uses integral base units; transfers and named
 unit conversions are now implemented in `TRANSFERS_UOM.md`. Cost layers and valuation
 are now implemented as described in `COSTING.md`.
 
-The existing Kafka publisher is a simulator, and its worker lifecycle still needs
-repair. This slice guarantees durable enqueue, not external event delivery.
+Real Kafka publication, leased retries, dead-letter recovery and worker lifecycle
+are now implemented; see [event delivery](EVENT_DELIVERY.md). Stock command
+responses guarantee durable enqueue; downstream delivery remains asynchronous.
 
 Configure `DATABASE_URL` (async SQLAlchemy URL) and `JWT_SECRET`. Dependencies
 include PyJWT. No production secret or authentication fallback is supplied.

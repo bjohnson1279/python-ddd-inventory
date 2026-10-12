@@ -1,4 +1,3 @@
-import asyncio
 from fastapi import FastAPI, Request, Depends
 from src.presentation.product.router import router as product_router
 from src.presentation.cycle_count.router import router as cycle_count_router
@@ -8,12 +7,34 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     from src.infrastructure.auth.identity import jwt_secret
     jwt_secret()
-    # Setup/teardown events can go here. 
-    # Skipping Base.metadata.create_all as migrations should handle it in production.
-    yield
+    from src.infrastructure.messaging.settings import outbox_enabled
+    app.state.outbox_enabled = outbox_enabled()
+    app.state.outbox_worker = None
+    if not app.state.outbox_enabled:
+        yield
+        return
+    publisher, worker = build_event_delivery()
+    try:
+        await publisher.start()
+        await worker.start()
+        app.state.outbox_worker = worker
+        yield
+    finally:
+        try:
+            await worker.stop()
+        finally:
+            await publisher.stop()
+            app.state.outbox_worker = None
 
 from src.infrastructure.messaging.kafka_publisher import KafkaPublisher
 from src.application.workers.outbox_worker import OutboxWorker
+from src.infrastructure.messaging.settings import OutboxSettings
+
+
+def build_event_delivery():
+    settings = OutboxSettings.from_env()
+    publisher = KafkaPublisher.from_env(timeout=settings.publish_timeout)
+    return publisher, OutboxWorker(publisher, settings=settings)
 from src.infrastructure.telemetry import setup_telemetry
 from src.presentation.graphql import graphql_app
 
@@ -49,6 +70,9 @@ app.include_router(return_router, prefix='/api')
 from src.presentation.transfer_router import router as transfer_router
 app.include_router(transfer_router)
 app.include_router(transfer_router, prefix='/api')
+from src.presentation.outbox_router import router as outbox_router
+app.include_router(outbox_router)
+app.include_router(outbox_router, prefix='/api')
 from src.presentation.catalog_router import router as catalog_router
 app.include_router(catalog_router)
 app.include_router(catalog_router, prefix='/api')
@@ -126,23 +150,15 @@ app.include_router(notification_router)
 from src.presentation.aging.router import router as aging_router
 app.include_router(aging_router)
 
-publisher = KafkaPublisher()
-worker = OutboxWorker(publisher)
-
-@app.on_event('startup')
-async def startup_event():
-    await publisher.start()
-    asyncio.create_task(worker.start())
-
-@app.on_event('shutdown')
-async def shutdown_event():
-    await worker.stop()
-    await publisher.stop()
-
-
 @app.get('/health')
 async def health_check():
-    return {'status': 'healthy'}
+    enabled = getattr(app.state, 'outbox_enabled', False)
+    worker = getattr(app.state, 'outbox_worker', None)
+    running = bool(worker and worker.running)
+    error = worker.last_poll_error if worker else None
+    result = {'status': 'healthy' if not enabled or (running and not error) else 'degraded',
+              'eventDelivery': {'enabled': enabled, 'running': running, 'pollingError': error}}
+    return JSONResponse(result, status_code=200 if result['status'] == 'healthy' else 503)
 
 
 

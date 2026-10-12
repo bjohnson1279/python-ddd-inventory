@@ -116,15 +116,16 @@ async def test_transfer_competing_dispatches_duplicate_receipts_and_uom_updates(
             await conn.execute(text("SELECT set_config('app.current_tenant_id', 'store-b', true)"))
             assert await conn.scalar(text('SELECT count(*) FROM python_stock_transfers')) == 0
             assert await conn.scalar(text('SELECT count(*) FROM python_uom_configs')) == 1
-        product = await client.post('/products', headers=a, json={'sku': 'ONLY_A', 'name': 'Private', 'price_amount': '1.00'})
-        assert product.status_code == 201
+        product = await client.post('/products', headers=a, json={'sku': 'ONLY-A', 'name': 'Private', 'price_amount': '1.00'})
+        assert product.status_code == 201, product.text
         with pytest.raises(DBAPIError):
             async with runtime.begin() as conn:
                 await conn.execute(text("SELECT set_config('app.current_tenant_id', 'store-b', true)"))
                 await conn.execute(text("INSERT INTO python_uom_configs (id,tenant_id,sku,base_unit,category,purchase_unit,sale_unit,rules,version) "
-                    "VALUES ('bad-parent','store-b','ONLY_A','ea','discrete','ea','ea','[]',0)"))
+                    "VALUES ('bad-parent','store-b','ONLY-A','ea','discrete','ea','ea','[]',0)"))
         with pytest.raises(DBAPIError):
             async with runtime.begin() as conn:
                 await conn.execute(text("SELECT set_config('app.current_tenant_id', 'store-b', true)"))
                 await conn.execute(text("INSERT INTO python_stock_transfers (id,tenant_id,source_location_id,destination_location_id,status,version,items,created_by,created_at) "
-                    "VALUES ('bad-transfer','store-b','shop','store','DRAFT',0,'[{\"sku\":\"ONLY_A\",\"quantity\":1}]','attacker',now())"))
+                    "VALUES ('bad-transfer','store-b','shop','store','DRAFT',0,:items,'attacker',now())"),
+                    {'items': '[{"sku":"ONLY-A","quantity":1}]'})

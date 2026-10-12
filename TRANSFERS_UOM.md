@@ -121,7 +121,10 @@ conversions and count/procurement/return compatibility. Independent SQLite sessi
 cover competing dispatches, duplicate receipts and concurrent UOM edits. A
 repeatable legacy-schema upgrade preserves original whole-cent carrying values.
 
-Restricted-role PostgreSQL contracts are wired into CI. Local PostgreSQL checks
-remain pending because Docker did not respond. Client TypeScript is checked
-separately; Vitest remains unverified because its worker times out before loading
-tests. This is targeted regression evidence, not full-suite coverage measurement.
+Restricted-role PostgreSQL contracts are wired into CI. The previously pending
+local contract passed against the disposable event-delivery database on
+2026-10-12 after correcting two test-fixture errors (an invalid SKU and unbound
+inline JSON). All 20 Python client adapter tests, including transfers/UOM, and
+TypeScript `--noEmit` also passed. This is targeted regression evidence, not a
+whole-repository coverage measurement. See [event delivery](EVENT_DELIVERY.md)
+for the new asynchronous publication workflow.
