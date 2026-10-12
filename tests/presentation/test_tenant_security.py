@@ -211,6 +211,7 @@ async def test_warehouse_can_move_stock_without_pricing_or_reading_cogs(client):
     sold = client.post('/inventory/dispatch', headers=operator, json={'sku': 'OPERATIONS-SKU', 'quantity': 1})
     assert sold.status_code == 200 and sold.json()['quantity'] == 2
     assert 'costOfGoodsSoldCents' not in sold.json()
+    assert all('costCents' not in entry for entry in sold.json()['consumedLayers'])
     movement = next(row for row in client.get('/inventory/movements').json() if row['operation'] == 'dispatch')
     assert movement['result']['costOfGoodsSoldCents'] == 25
     assert client.get('/accounting/cost-layers', headers=operator).status_code == 403

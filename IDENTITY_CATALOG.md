@@ -96,3 +96,5 @@ was made in that first slice. Costing and valuation are now implemented. Remaini
 parity work includes transfers and serials. Procurement and replenishment are
 now implemented as described in `PROCUREMENT.md`. Physical counts now
 reconcile through explicit manager approval as described in `COUNTS.md`.
+Customer/supplier returns, quarantine decisions and inventory write-offs are now
+implemented as described in `RETURNS.md`.

@@ -17,8 +17,9 @@ PERMISSIONS = {
     'counts:read', 'counts:manage', 'counts:submit', 'accounting:read', 'accounting:write',
     'reports:read', 'reports:write', 'notifications:self', 'users:manage', 'supplier:portal',
     'procurement:read', 'procurement:write',
+    'returns:read', 'returns:write',
 }
-READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read'}
+READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read', 'returns:read'}
 ROLE_PERMISSIONS = {
     'ADMIN': PERMISSIONS - {'supplier:portal'},
     'MANAGER': PERMISSIONS - {'users:manage', 'supplier:portal'},
@@ -54,6 +55,8 @@ def permission_for(path, method):
         return 'identity:self'
     if path.startswith('/supplier-portal'):
         return 'supplier:portal'
+    if path.startswith('/returns'):
+        return 'returns:read' if read else 'returns:write'
     if path.startswith(('/suppliers', '/purchase-orders', '/reorder-policies')):
         return 'procurement:read' if read else 'procurement:write'
     if path.startswith('/notifications'):
@@ -85,7 +88,11 @@ def require_purchase_cost_permission(request, unit_cost_cents):
 def stock_response(request, result):
     if 'accounting:read' in request.state.permissions:
         return result
-    return {key: value for key, value in result.items() if key != 'costOfGoodsSoldCents'}
+    masked = {key: value for key, value in result.items() if key != 'costOfGoodsSoldCents'}
+    if 'consumedLayers' in masked:
+        masked['consumedLayers'] = [{key: value for key, value in layer.items() if key != 'costCents'}
+                                    for layer in masked['consumedLayers']]
+    return masked
 
 
 async def authorize_request(request: Request, session: AsyncSession = Depends(get_db_session)):

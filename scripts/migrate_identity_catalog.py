@@ -20,13 +20,15 @@ from src.infrastructure.messaging.models import OutboxEventModel
 from src.infrastructure.catalog_models import CatalogModel, VariantLinkModel, BarcodeModel
 from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 from src.infrastructure.procurement_models import SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel
+from src.infrastructure.return_models import ReturnModel, ReturnActionModel, QuarantineModel
 
 
 async def create_related(conn):
     for model in (StockModel, StockMovementModel, OutboxEventModel, CatalogModel, VariantLinkModel, BarcodeModel,
                   AccountingConfigModel, CostLayerModel, ReportDefinitionModel, NotificationModel,
                   CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel, CountRequestModel,
-                  SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel):
+                  SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel,
+                  ReturnModel, ReturnActionModel, QuarantineModel):
         await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
     upgrades = {
         'cycle_count_records': {'location_id': 'VARCHAR', 'revision': 'INTEGER NOT NULL DEFAULT 0',

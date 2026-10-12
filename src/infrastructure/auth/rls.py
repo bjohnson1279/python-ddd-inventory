@@ -9,7 +9,8 @@ async def install_tenant_policies(conn):
               'python_report_definitions', 'python_notifications', 'python_security_audit',
               'cycle_count_plans', 'cycle_count_records', 'python_count_requests',
               'python_suppliers', 'python_purchase_orders', 'python_procurement_actions',
-              'python_reorder_policies', 'python_supplier_asns']
+              'python_reorder_policies', 'python_supplier_asns', 'python_returns',
+              'python_return_actions', 'python_return_quarantine']
     quote = conn.dialect.identifier_preparer.quote
     predicate = "tenant_id = current_setting('app.current_tenant_id', true)"
     for table in tables:
@@ -23,6 +24,12 @@ async def install_tenant_policies(conn):
             row_predicate += " AND EXISTS (SELECT 1 FROM python_suppliers s WHERE s.id = supplier_id AND s.tenant_id = current_setting('app.current_tenant_id', true))"
         if table == 'python_supplier_asns':
             row_predicate += " AND EXISTS (SELECT 1 FROM python_purchase_orders p WHERE p.id = po_id AND p.supplier_id = python_supplier_asns.supplier_id AND p.tenant_id = current_setting('app.current_tenant_id', true))"
+        if table == 'python_returns':
+            row_predicate += " AND EXISTS (SELECT 1 FROM python_stock_movements m WHERE m.id = source_movement_id AND m.tenant_id = current_setting('app.current_tenant_id', true))"
+            row_predicate += " AND (supplier_id IS NULL OR EXISTS (SELECT 1 FROM python_suppliers s WHERE s.id = python_returns.supplier_id AND s.tenant_id = current_setting('app.current_tenant_id', true)))"
+        if table == 'python_return_quarantine':
+            row_predicate += " AND EXISTS (SELECT 1 FROM python_returns r WHERE r.id = return_id AND r.tenant_id = current_setting('app.current_tenant_id', true)) AND EXISTS (SELECT 1 FROM python_stock s WHERE s.id = stock_id AND s.tenant_id = current_setting('app.current_tenant_id', true))"
+            row_predicate += " AND EXISTS (SELECT 1 FROM python_returns r JOIN python_stock_movements m ON m.id = r.source_movement_id WHERE r.id = python_return_quarantine.return_id AND m.result ->> 'id' = python_return_quarantine.stock_id)"
         await conn.execute(text(f'ALTER TABLE {name} ENABLE ROW LEVEL SECURITY'))
         await conn.execute(text(f'ALTER TABLE {name} FORCE ROW LEVEL SECURITY'))
         await conn.execute(text(f'DROP POLICY IF EXISTS python_tenant_isolation ON {name}'))

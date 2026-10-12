@@ -112,6 +112,14 @@ The current outbox publisher/lifecycle remains unfinished.
 
 ## Verification and remaining work
 
+Returns and write-offs require explicit read/write permissions. Their services
+verify owned source movements, purchase receipts and quarantine stock before
+retry replay. Forced PostgreSQL policies additionally enforce those parent
+links. Customer return authorization caps quantities across requests, and
+write-offs preserve allocated goods. Non-accounting stock responses redact the
+new per-layer consumed `costCents` values. See `RETURNS.md` for workflow coverage
+and the pending local PostgreSQL verification of these new policies.
+
 The full regression run passed 350 tests with the opt-in PostgreSQL scenario
 skipped in that run. Dedicated database runs separately passed both the existing
 costing/migration scenario and the new security scenario using a real non-owner,

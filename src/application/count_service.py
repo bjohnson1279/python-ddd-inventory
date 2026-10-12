@@ -13,6 +13,7 @@ from src.infrastructure.cycle_count.models import (
 from src.infrastructure.stock_models import StockModel, StockMovementModel
 from src.infrastructure.messaging.models import OutboxEventModel
 from src.infrastructure.auth.identity import UserModel
+from src.application.quarantine_service import record_quarantine_losses
 
 
 class CountNotFound(ValueError):
@@ -200,6 +201,8 @@ class CountService:
             value = -cost if cost is not None else None
             costing = {'consumedLayers': used, 'costingMethod': self.config.costing_method,
                        'costStatus': 'PRICED' if cost is not None else 'UNPRICED'}
+            if any(layer.quarantined for layer in layers):
+                costing['quarantineChanges'] = await record_quarantine_losses(self.session, self.tenant, used)
         changed = await self.session.execute(update(StockModel).where(StockModel.id == stock.id,
             StockModel.tenant_id == self.tenant, StockModel.version == version).values(quantity=quantity, version=version + 1))
         if changed.rowcount != 1:

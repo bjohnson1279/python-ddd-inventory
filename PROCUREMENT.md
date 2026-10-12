@@ -121,7 +121,8 @@ policy policies verify supplier ownership, ASN policies verify PO/supplier
 ownership. Use a non-superuser/non-BYPASSRLS runtime login. Migration is repeatable.
 No existing store database was migrated during development.
 
-Remaining work includes supplier returns, invoice matching/payables, taxes,
+Supplier returns are now implemented; see `RETURNS.md`. Remaining work includes
+invoice matching/payables, taxes,
 foreign currencies/UOMs, email/EDI delivery and demand forecasts beyond the
 dispatch-history proxy. Existing stock/count and integration delivery limitations
 remain documented in `COSTING.md`, `COUNTS.md` and `SECURITY.md`.

@@ -43,6 +43,9 @@ app.include_router(stock_router, prefix='/api')
 from src.presentation.procurement_router import router as procurement_router
 app.include_router(procurement_router)
 app.include_router(procurement_router, prefix='/api')
+from src.presentation.return_router import router as return_router
+app.include_router(return_router)
+app.include_router(return_router, prefix='/api')
 from src.presentation.catalog_router import router as catalog_router
 app.include_router(catalog_router)
 app.include_router(catalog_router, prefix='/api')

@@ -70,7 +70,7 @@ def redistribute_value(layers, total_value):
         layer.remaining_value_cents += 1
 
 
-def consume(layers, quantity, method, now=None, lot_number=None, include_ineligible=False):
+def consume(layers, quantity, method, now=None, lot_number=None, include_ineligible=False, layer_ids=None):
     if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
         raise ValueError('Quantity must be a positive integer')
     method = normalize_method(method)
@@ -83,6 +83,8 @@ def consume(layers, quantity, method, now=None, lot_number=None, include_ineligi
             else datetime.max.replace(tzinfo=timezone.utc) if method == CostingMethod.FEFO
             else utc(layer.received_at), utc(layer.received_at), layer.id),
             reverse=method == CostingMethod.LIFO)
+    if layer_ids is not None:
+        selected = [layer for layer in selected if layer.id in layer_ids]
     if sum(layer.remaining_quantity for layer in selected) < quantity:
         raise ValueError('Insufficient eligible cost layers for requested quantity or lot')
     active = [layer for layer in layers if layer.remaining_quantity]
@@ -109,7 +111,12 @@ def consume(layers, quantity, method, now=None, lot_number=None, include_ineligi
                 cost = None
                 if layer.remaining_quantity == 0:
                     layer.remaining_value_cents = 0
-        consumptions.append({'layerId': layer.id, 'lotNumber': layer.lot_number, 'quantity': taken})
+        consumptions.append({'layerId': layer.id, 'lotNumber': layer.lot_number, 'quantity': taken,
+            'costCents': taken * layer.unit_cost_cents if known and method != CostingMethod.WAC else None})
     if method == CostingMethod.WAC:
+        from src.domain.return_costing import allocate_cents
+        values = allocate_cents(cost, [item['quantity'] for item in consumptions])
+        for item, value in zip(consumptions, values):
+            item['costCents'] = value
         redistribute_value(layers, total_value - cost)
     return cost, consumptions
