@@ -3,7 +3,7 @@
 This first implementation slice provides persisted tenant/admin setup, password
 hashing, one-hour HS256 access tokens, role-populated request identity and tenant
 catalog isolation, quantity variants, barcode assignment/scanning and stock
-operations. Serial tracking and procurement
+operations. Serial tracking
 remain unfinished.
 Lot-backed costing and valuation have since been implemented; see `COSTING.md`
 for methods, receipt fields, opening-stock pricing and migration instructions.
@@ -93,5 +93,6 @@ lifespan/test-client/time handling.
 
 No database migration was applied to a running store, and no commit or deployment
 was made in that first slice. Costing and valuation are now implemented. Remaining
-parity work includes transfers, procurement and serials. Physical counts now
+parity work includes transfers and serials. Procurement and replenishment are
+now implemented as described in `PROCUREMENT.md`. Physical counts now
 reconcile through explicit manager approval as described in `COUNTS.md`.

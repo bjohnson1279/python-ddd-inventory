@@ -80,9 +80,9 @@ comes from verified identity. Cross-tenant object IDs return not-found responses
   view, not a complete unit-age/ESG reporting implementation.
 - GraphQL product reads use the verified tenant and real catalog rows, replacing
   mock products. There are no unguarded product queries or write mutations.
-- Supplier routes require the persisted supplier role/binding and fail with 501
-  while a tenant-scoped repository is unavailable. They cannot acknowledge a
-  nonexistent/unowned PO through a mock-success fallback.
+- Supplier routes now use persisted owned suppliers/POs and shipping notices;
+  see `PROCUREMENT.md`. Inactive/foreign bindings are rejected, acknowledgments
+  and ASNs are durable, and neither operation adjusts warehouse stock.
 - Signed integration webhooks remain public only on their exact registered
   routes and retain their signature checks. Their real stock-ingestion/durable
   deduplication work is still pending. Dormant offline-sync/WebSocket modules are
@@ -126,7 +126,7 @@ report/GraphQL isolation, registration defaults and throttling. Older tests now
 use real login rather than mocked administrator roles or permissive status sets.
 The PostgreSQL scenarios are part of the dedicated backend CI job.
 
-Custom role editing, MFA/SSO, account-recovery delivery, supplier persistence,
+Custom role editing, MFA/SSO, account-recovery delivery,
 durable report/sharing jobs and active WebSocket
 authorization remain additional work. No store database was migrated or service
 deployed during this change.

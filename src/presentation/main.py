@@ -40,6 +40,9 @@ app.include_router(users_router, prefix='/api')
 from src.presentation.stock_router import router as stock_router
 app.include_router(stock_router)
 app.include_router(stock_router, prefix='/api')
+from src.presentation.procurement_router import router as procurement_router
+app.include_router(procurement_router)
+app.include_router(procurement_router, prefix='/api')
 from src.presentation.catalog_router import router as catalog_router
 app.include_router(catalog_router)
 app.include_router(catalog_router, prefix='/api')

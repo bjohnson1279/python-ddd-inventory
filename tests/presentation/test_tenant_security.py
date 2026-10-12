@@ -194,8 +194,9 @@ async def test_notifications_cannot_select_another_recipient_or_tenant_manager(c
 async def test_supplier_feature_requires_bound_role_and_real_persistence(client):
     assert client.get('/api/supplier-portal/pos').status_code == 403
     assert client.post('/users', json={'email': 'supplier@example.com', 'role': 'SUPPLIER_USER'}).status_code == 422
-    _, headers = staff(client, 'SUPPLIER_USER', supplierId='SUPPLIER-A')
-    assert client.get('/api/supplier-portal/pos', headers=headers).status_code == 501
+    supplier = client.post('/suppliers', json={'name': 'Supplier A', 'mutationId': 'supplier-a'}).json()
+    _, headers = staff(client, 'SUPPLIER_USER', supplierId=supplier['id'])
+    assert client.get('/api/supplier-portal/pos', headers=headers).json() == {'pos': []}
     assert client.get('/products', headers=headers).status_code == 403
 
 

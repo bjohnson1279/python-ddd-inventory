@@ -16,8 +16,9 @@ PERMISSIONS = {
     'identity:self', 'catalog:read', 'catalog:write', 'inventory:read', 'inventory:write',
     'counts:read', 'counts:manage', 'counts:submit', 'accounting:read', 'accounting:write',
     'reports:read', 'reports:write', 'notifications:self', 'users:manage', 'supplier:portal',
+    'procurement:read', 'procurement:write',
 }
-READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self'}
+READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read'}
 ROLE_PERMISSIONS = {
     'ADMIN': PERMISSIONS - {'supplier:portal'},
     'MANAGER': PERMISSIONS - {'users:manage', 'supplier:portal'},
@@ -53,6 +54,8 @@ def permission_for(path, method):
         return 'identity:self'
     if path.startswith('/supplier-portal'):
         return 'supplier:portal'
+    if path.startswith(('/suppliers', '/purchase-orders', '/reorder-policies')):
+        return 'procurement:read' if read else 'procurement:write'
     if path.startswith('/notifications'):
         return 'notifications:self'
     if path.startswith('/cycle-counts'):

@@ -1,103 +1,92 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
-from src.domain.supplier_collaboration.entity import AdvanceShippingNotice, ASNLineItem
-from src.domain.supplier_collaboration.services import ASNSubmissionService
-from src.domain.supplier_collaboration.repository import SupplierCollaborationRepository
-from src.infrastructure.auth.rbac import requires_roles
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from pydantic import BaseModel, Field, AwareDatetime
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.infrastructure.database import get_db_session
 from src.infrastructure.auth.identity import current_tenant
+from src.infrastructure.auth.rbac import requires_roles
+from src.infrastructure.procurement_models import PurchaseOrderModel, ASNModel
+from src.application.procurement_service import ProcurementService, ProcurementNotFound, po_dto, OPEN
+from src.application.stock_service import StockConflict
+from src.domain.product.layer_costing import utc
 
-router = APIRouter(prefix="/api/supplier-portal", tags=["SupplierPortal"])
-
-# In a real setup, we'd have a DB dependency to inject the repository.
-# For scaffolding/parity, we will use a mock dependency or fetch from request state.
+router = APIRouter(prefix='/api/supplier-portal', tags=['SupplierPortal'])
 
 class POAcknowledgementDTO(BaseModel):
-    expected_delivery_date: datetime
+    expected_delivery_date: AwareDatetime
+    mutationId: str = Field(min_length=1, max_length=100)
 
 class ASNLineItemDTO(BaseModel):
-    sku: str
-    shipped_quantity: int
-    lot_number: Optional[str] = None
+    sku: str = Field(min_length=1, max_length=100)
+    shipped_quantity: int = Field(gt=0, le=2_147_483_647, strict=True)
+    lot_number: str | None = Field(default=None, min_length=1, max_length=100)
 
 class ASNSubmitDTO(BaseModel):
     po_id: str
-    tracking_number: str
-    estimated_delivery_date: datetime
-    items: List[ASNLineItemDTO]
+    tracking_number: str = Field(min_length=1, max_length=200)
+    estimated_delivery_date: AwareDatetime
+    items: list[ASNLineItemDTO] = Field(min_length=1, max_length=1000)
+    mutationId: str = Field(min_length=1, max_length=100)
 
-def get_supplier_repo(request: Request) -> SupplierCollaborationRepository:
-    current_tenant(request)
-    if not getattr(request.state, 'supplier_id', None):
+async def supplier_service(request: Request, db: AsyncSession = Depends(get_db_session)):
+    supplier_id = getattr(request.state, 'supplier_id', None)
+    if not supplier_id:
         raise HTTPException(403, 'Supplier identity is not bound to this user')
-    raise HTTPException(501, 'Tenant-scoped supplier persistence is not implemented')
+    svc = ProcurementService(db, current_tenant(request), request.state.user_id, supplier_id)
+    try:
+        await svc.supplier(supplier_id)
+    except ProcurementNotFound as exc:
+        raise HTTPException(404, str(exc))
+    return svc
 
-@router.get("/pos")
-@requires_roles(["SUPPLIER_USER"])
-async def list_supplier_pos(request: Request, repo: SupplierCollaborationRepository = Depends(get_supplier_repo)):
-    supplier_id = request.state.supplier_id
-    if repo:
-        pos = await repo.get_supplier_pos(supplier_id)
-        return {"pos": pos}
-    return {"pos": []}
+async def execute(svc, operation, dto, po_id=None):
+    data = dto.model_dump(mode='json')
+    key = data.pop('mutationId')
+    if po_id:
+        data['po_id'] = po_id
+    try:
+        return await svc.execute(operation, data, key)
+    except ProcurementNotFound as exc:
+        raise HTTPException(404, str(exc))
+    except StockConflict as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
-@router.post("/pos/{po_id}/acknowledge")
-@requires_roles(["SUPPLIER_USER"])
-async def acknowledge_po(po_id: str, dto: POAcknowledgementDTO, request: Request, repo: SupplierCollaborationRepository = Depends(get_supplier_repo)):
-    supplier_id = request.state.supplier_id
-    
-    if repo:
-        po = await repo.get_po(po_id)
-        if not po or po.supplier_id != supplier_id:
-            raise HTTPException(status_code=404, detail="PO not found")
-        
-        po.status = "ACKNOWLEDGED"
-        po.expected_delivery_date = dto.expected_delivery_date
-        po.acknowledged_date = datetime.utcnow()
-        await repo.save_po(po)
-        
-    return {"success": True, "status": "ACKNOWLEDGED"}
+@router.get('/pos')
+@requires_roles(['SUPPLIER_USER'])
+async def list_supplier_pos(request: Request, svc=Depends(supplier_service),
+                            limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
+    rows = await svc.session.scalars(select(PurchaseOrderModel).where(
+        PurchaseOrderModel.tenant_id == svc.tenant, PurchaseOrderModel.supplier_id == svc.supplier_id,
+        PurchaseOrderModel.status.in_((*OPEN, 'RECEIVED'))).order_by(PurchaseOrderModel.created_at.desc()).limit(limit).offset(offset))
+    return {'pos': [po_dto(row) for row in rows]}
 
-@router.post("/asns")
-@requires_roles(["SUPPLIER_USER"])
-async def submit_asn(dto: ASNSubmitDTO, request: Request, repo: SupplierCollaborationRepository = Depends(get_supplier_repo)):
-    supplier_id = request.state.supplier_id
-    service = ASNSubmissionService()
-    
-    if repo:
-        po = await repo.get_po(dto.po_id)
-        if not po or po.supplier_id != supplier_id:
-            raise HTTPException(status_code=404, detail="PO not found")
-            
-        asn_items = [
-            ASNLineItem(sku=i.sku, shipped_quantity=i.shipped_quantity, lot_number=i.lot_number)
-            for i in dto.items
-        ]
-        
-        asn = AdvanceShippingNotice(
-            po_id=dto.po_id,
-            supplier_id=supplier_id,
-            tracking_number=dto.tracking_number,
-            estimated_delivery_date=dto.estimated_delivery_date,
-            items=asn_items
-        )
-        
-        try:
-            valid_asn = service.validate_and_submit_asn(po, asn)
-            await repo.save_asn(valid_asn)
-            await repo.save_po(po) # Saves SHIPPED status
-            return {"success": True, "asn_id": valid_asn.id}
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-            
-    return {"success": True, "asn_id": "mock_asn_id"}
+@router.post('/pos/{po_id}/acknowledge')
+@requires_roles(['SUPPLIER_USER'])
+async def acknowledge_po(po_id: str, dto: POAcknowledgementDTO, request: Request, svc=Depends(supplier_service)):
+    return await execute(svc, 'acknowledge', dto, po_id)
 
-@router.get("/performance")
-@requires_roles(["SUPPLIER_USER"])
-async def get_supplier_performance(request: Request, repo: SupplierCollaborationRepository = Depends(get_supplier_repo)):
-    supplier_id = request.state.supplier_id
-    if repo:
-        perf = await repo.get_performance(supplier_id)
-        return {"performance": perf}
-    return {"performance": {"otif_percentage": 98.5, "defect_rate_percentage": 1.2}}
+@router.post('/asns')
+@requires_roles(['SUPPLIER_USER'])
+async def submit_asn(dto: ASNSubmitDTO, request: Request, svc=Depends(supplier_service)):
+    return await execute(svc, 'asn', dto)
+
+@router.get('/asns')
+@requires_roles(['SUPPLIER_USER'])
+async def asns(request: Request, svc=Depends(supplier_service), limit: int = Query(100, ge=1, le=1000)):
+    rows = await svc.session.scalars(select(ASNModel).where(ASNModel.tenant_id == svc.tenant,
+                                                           ASNModel.supplier_id == svc.supplier_id).limit(limit))
+    return {'asns': [{'id': row.id, **row.payload} for row in rows]}
+
+@router.get('/performance')
+@requires_roles(['SUPPLIER_USER'])
+async def performance(request: Request, svc=Depends(supplier_service)):
+    rows = list(await svc.session.scalars(select(PurchaseOrderModel).where(
+        PurchaseOrderModel.tenant_id == svc.tenant, PurchaseOrderModel.supplier_id == svc.supplier_id,
+        PurchaseOrderModel.status == 'RECEIVED')))
+    measured = [row for row in rows if row.expected_delivery_date and row.received_at]
+    on_time = sum(utc(row.received_at) <= utc(row.expected_delivery_date) for row in measured)
+    return {'performance': {'completed_orders': len(rows), 'measured_orders': len(measured),
+        'otif_percentage': 100 * on_time / len(measured) if measured else None,
+        'defect_rate_percentage': None}}

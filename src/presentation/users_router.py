@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.database import get_db_session
 from src.infrastructure.auth.identity import UserModel, TenantModel, LoginSessionModel, SecurityAuditModel, current_tenant, password_hash, verify_password
 from src.infrastructure.auth.security import ROLE_PERMISSIONS, PERMISSIONS
+from src.infrastructure.procurement_models import SupplierModel
 
 router = APIRouter(tags=['users and sessions'])
 
@@ -71,6 +72,12 @@ async def owned_user(session, tenant, user_id):
     return user
 
 
+async def validate_supplier_binding(session, tenant, supplier_id):
+    if supplier_id and not await session.scalar(select(SupplierModel.id).where(
+            SupplierModel.id == supplier_id, SupplierModel.tenant_id == tenant, SupplierModel.is_active.is_(True))):
+        raise HTTPException(404, 'Supplier not found or inactive')
+
+
 async def keep_admin(session, user, removing):
     if removing and user.is_active and user.role == 'ADMIN':
         admins = list(await session.scalars(select(UserModel.id).where(
@@ -96,6 +103,7 @@ async def users(request: Request, session: AsyncSession = Depends(get_db_session
 @router.post('/users', status_code=201)
 async def invite(data: InviteDTO, request: Request, session: AsyncSession = Depends(get_db_session)):
     tenant = await admin_lock(session, request)
+    await validate_supplier_binding(session, tenant, data.supplierId)
     generated = data.password is None
     password = data.password or secrets.token_urlsafe(20)
     hashed = await run_in_threadpool(password_hash, password)
@@ -123,6 +131,7 @@ async def change_role(user_id: str, data: RoleDTO, request: Request, session: As
     if (data.role == 'SUPPLIER_USER') != bool(data.supplierId):
         raise HTTPException(422, 'Supplier binding must match the selected role')
     await keep_admin(session, user, data.role != 'ADMIN')
+    await validate_supplier_binding(session, user.tenant_id, data.supplierId)
     user.role, user.supplier_id = data.role, data.supplierId
     await revoke_and_audit(session, request, user, 'role-changed')
     await session.commit()

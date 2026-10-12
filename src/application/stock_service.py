@@ -24,7 +24,7 @@ class StockService:
 
     async def mutate(self, operation, sku, location, amount, mutation_id=None, expected_version=None,
                      unit_cost_cents=None, lot_number=None, expiration_date=None,
-                     received_at=None, quarantined=False):
+                     received_at=None, quarantined=False, *, commit=True, config=None, reference=None):
         if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
             raise ValueError('Quantity must be a positive integer')
         if unit_cost_cents is not None and (type(unit_cost_cents) is not int or not 0 <= unit_cost_cents <= 2_147_483_647):
@@ -41,9 +41,11 @@ class StockService:
         fingerprint.update({key: value for key, value in metadata.items() if value is not None})
         if quarantined:
             fingerprint['quarantined'] = True
+        if reference:
+            fingerprint['reference'] = reference
         mutation_id = mutation_id or str(uuid.uuid4())
         try:
-            config = await locked_config(self.session, self.tenant_id)
+            config = config or await locked_config(self.session, self.tenant_id)
             prior = await self.session.scalar(select(StockMovementModel).where(
                 StockMovementModel.tenant_id == self.tenant_id,
                 StockMovementModel.mutation_id == mutation_id))
@@ -51,7 +53,8 @@ class StockService:
                 if prior.request != fingerprint:
                     raise StockConflict('Mutation ID was already used for another request')
                 result = prior.result
-                await self.session.rollback()
+                if commit:
+                    await self.session.rollback()
                 return result
             product = await self.session.scalar(select(ProductModel.id).where(
                 ProductModel.tenant_id == self.tenant_id, ProductModel.sku == sku))
@@ -105,17 +108,24 @@ class StockService:
             result = {'id': row.id, 'sku': sku, 'locationId': location,
                       'quantity': quantity, 'allocated': allocated,
                       'available': quantity - allocated, 'version': version + 1, **costing}
+            if reference:
+                result['reference'] = reference
             self.session.add(StockMovementModel(tenant_id=self.tenant_id, mutation_id=mutation_id,
                 actor_id=self.actor_id, sku=sku, location_id=location, operation=operation,
                 amount=amount, request=fingerprint, result=result))
             self.session.add(OutboxEventModel(aggregate_type='Stock', aggregate_id=row.id,
                 event_type='StockChanged', payload={**result, 'tenantId': self.tenant_id,
                     'actorId': self.actor_id, 'mutationId': mutation_id, 'operation': operation}))
-            await self.session.commit()
+            if commit:
+                await self.session.commit()
+            else:
+                await self.session.flush()
             return result
         except IntegrityError as exc:
-            await self.session.rollback()
+            if commit:
+                await self.session.rollback()
             raise StockConflict('Concurrent stock mutation; retry with the same mutation ID') from exc
         except Exception:
-            await self.session.rollback()
+            if commit:
+                await self.session.rollback()
             raise
