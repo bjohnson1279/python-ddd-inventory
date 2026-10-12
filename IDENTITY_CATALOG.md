@@ -25,8 +25,8 @@ returns the original result; changing its payload returns 409. Supply a stable
 mutation ID when retrying requests. Concurrent version conflicts return 409.
 Stock quantity, allocation, movement history and outbox enqueue share one database
 transaction. Dispatch cannot consume reserved stock. A catalog SKU must exist
-in the authenticated tenant. New stock supports discrete units only;
-transfers and UOM conversion remain follow-up work. Cost layers and valuation
+in the authenticated tenant. Stock uses integral base units; transfers and named
+unit conversions are now implemented in `TRANSFERS_UOM.md`. Cost layers and valuation
 are now implemented as described in `COSTING.md`.
 
 The existing Kafka publisher is a simulator, and its worker lifecycle still needs
@@ -70,7 +70,7 @@ are implemented for the mounted APIs. `SECURITY.md` covers the later ownership
 audit, forced PostgreSQL policies and explicit failures for unfinished features.
 
 Tests now use actual setup/login rather than globally mocking every request as an
-administrator. Follow-up work: serial variants and transfers,
+administrator. Follow-up work: serial variants,
 financial journal posting and advanced identity features. Reviewed count
 reconciliation and offline submissions are now implemented; see `COUNTS.md`.
 Revocation, throttling and restricted-role PostgreSQL checks are now implemented.
@@ -93,7 +93,7 @@ lifespan/test-client/time handling.
 
 No database migration was applied to a running store, and no commit or deployment
 was made in that first slice. Costing and valuation are now implemented. Remaining
-parity work includes transfers and serials. Procurement and replenishment are
+parity work includes serials. Procurement and replenishment are
 now implemented as described in `PROCUREMENT.md`. Physical counts now
 reconcile through explicit manager approval as described in `COUNTS.md`.
 Customer/supplier returns, quarantine decisions and inventory write-offs are now

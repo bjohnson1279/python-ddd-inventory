@@ -123,9 +123,15 @@ No existing store database was migrated during development.
 
 Supplier returns are now implemented; see `RETURNS.md`. Remaining work includes
 invoice matching/payables, taxes,
-foreign currencies/UOMs, email/EDI delivery and demand forecasts beyond the
+foreign currencies, native PO packaging/invoice price conversion, email/EDI
+delivery and demand forecasts beyond the
 dispatch-history proxy. Existing stock/count and integration delivery limitations
 remain documented in `COSTING.md`, `COUNTS.md` and `SECURITY.md`.
+
+Named-unit stock operations and transfers are implemented in `TRANSFERS_UOM.md`.
+PO lines/receipts and policy thresholds remain integral base-unit contracts and
+reject named-unit fields. Usable dispatched transfers now count as incoming
+supply at their destination; transfers are excluded from sales demand.
 
 ## Verification
 

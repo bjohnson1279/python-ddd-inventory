@@ -15,6 +15,7 @@ from src.infrastructure.product.models import ProductModel
 from src.domain.product.value_objects import SKU
 from src.domain.product.exceptions import InvalidSKUError
 from src.application.stock_service import StockService, StockConflict
+from src.presentation.base_unit_contract import BaseUnitDTO
 
 router = APIRouter(tags=['retail catalog'])
 
@@ -144,7 +145,7 @@ async def assign_barcode(data: BarcodeDTO, request: Request, session: AsyncSessi
         raise HTTPException(409, 'Barcode already assigned')
 
 
-class ScanDTO(BaseModel):
+class ScanDTO(BaseUnitDTO):
     barcodeValue: str
     context: Literal['pos', 'receiving']
     scannedAmount: int = Field(gt=0, strict=True)

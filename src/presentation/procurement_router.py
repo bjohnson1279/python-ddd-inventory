@@ -8,6 +8,7 @@ from src.infrastructure.auth.identity import current_tenant
 from src.infrastructure.procurement_models import SupplierModel, PurchaseOrderModel, ReorderPolicyModel, ASNModel
 from src.application.procurement_service import ProcurementService, ProcurementNotFound, supplier_dto, po_dto, policy_dto
 from src.application.stock_service import StockConflict
+from src.presentation.base_unit_contract import BaseUnitDTO
 
 router = APIRouter(tags=['procurement and replenishment'])
 Quantity = Field(gt=0, le=2_147_483_647, strict=True)
@@ -35,7 +36,7 @@ class SupplierUpdateDTO(BaseModel):
     mutationId: str = Field(min_length=1, max_length=100)
 
 
-class OrderItemDTO(BaseModel):
+class OrderItemDTO(BaseUnitDTO):
     sku: str = Field(min_length=1, max_length=100)
     quantity: int = Quantity
     unitCostCents: int = Field(ge=0, le=2_147_483_647, strict=True)
@@ -50,7 +51,7 @@ class OrderDTO(BaseModel):
     mutationId: str = Field(min_length=1, max_length=100)
 
 
-class ReceiptItemDTO(BaseModel):
+class ReceiptItemDTO(BaseUnitDTO):
     sku: str = Field(min_length=1, max_length=100)
     quantity: int = Quantity
     lotNumber: str | None = Field(default=None, min_length=1, max_length=100)
@@ -64,7 +65,7 @@ class ReceiptDTO(BaseModel):
     items: list[ReceiptItemDTO] = Field(min_length=1, max_length=1000)
 
 
-class PolicyDTO(BaseModel):
+class PolicyDTO(BaseUnitDTO):
     sku: str = Field(min_length=1, max_length=100)
     locationId: str = Field(default='default', min_length=1, max_length=100)
     supplierId: str = Field(min_length=1, max_length=100)

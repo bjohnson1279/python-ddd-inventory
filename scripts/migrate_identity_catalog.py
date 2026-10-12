@@ -21,6 +21,7 @@ from src.infrastructure.catalog_models import CatalogModel, VariantLinkModel, Ba
 from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 from src.infrastructure.procurement_models import SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel
 from src.infrastructure.return_models import ReturnModel, ReturnActionModel, QuarantineModel
+from src.infrastructure.transfer_models import TransferModel, InventoryActionModel, UomConfigModel
 
 
 async def create_related(conn):
@@ -28,9 +29,11 @@ async def create_related(conn):
                   AccountingConfigModel, CostLayerModel, ReportDefinitionModel, NotificationModel,
                   CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel, CountRequestModel,
                   SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel,
-                  ReturnModel, ReturnActionModel, QuarantineModel):
+                  ReturnModel, ReturnActionModel, QuarantineModel,
+                  TransferModel, InventoryActionModel, UomConfigModel):
         await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
     upgrades = {
+        'python_cost_layers': {'initial_value_cents': 'BIGINT'},
         'cycle_count_records': {'location_id': 'VARCHAR', 'revision': 'INTEGER NOT NULL DEFAULT 0',
                                'approved_by': 'VARCHAR', 'approval_result': 'JSON'},
         'cycle_count_line_items': {'stock_version': 'INTEGER'},

@@ -24,8 +24,9 @@ class StockService:
 
     async def mutate(self, operation, sku, location, amount, mutation_id=None, expected_version=None,
                      unit_cost_cents=None, lot_number=None, expiration_date=None,
-                     received_at=None, quarantined=False, *, commit=True, config=None, reference=None):
-        if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
+                     received_at=None, quarantined=False, *, commit=True, config=None, reference=None,
+                     unit=None, uom_version=None):
+        if not unit and (type(amount) is not int or amount <= 0):
             raise ValueError('Quantity must be a positive integer')
         if unit_cost_cents is not None and (type(unit_cost_cents) is not int or not 0 <= unit_cost_cents <= 2_147_483_647):
             raise ValueError('Unit cost must be nonnegative integer cents within the supported limit')
@@ -35,6 +36,8 @@ class StockService:
             raise ValueError('Lot selection is only supported for receiving or dispatching')
         fingerprint = {'operation': operation, 'sku': sku, 'locationId': location,
                        'amount': amount, 'expectedVersion': expected_version}
+        if unit:
+            fingerprint.update(unit=unit, uomVersion=uom_version)
         metadata = {'unitCostCents': unit_cost_cents, 'lotNumber': lot_number,
                     'expirationDate': utc(expiration_date).isoformat() if expiration_date else None,
                     'receivedAt': utc(received_at).isoformat() if received_at else None}
@@ -56,6 +59,15 @@ class StockService:
                 if commit:
                     await self.session.rollback()
                 return result
+            conversion, receipt_total = None, None
+            if unit:
+                from src.application.uom_service import convert_input
+                from src.domain.uom import receipt_value
+                original_amount = amount
+                amount, conversion = await convert_input(self.session, self.tenant_id, sku, amount, unit, uom_version)
+                if operation == 'receive' and unit_cost_cents is not None:
+                    receipt_total = receipt_value(original_amount, unit_cost_cents)
+                    unit_cost_cents = None  # Price is per input unit, not per ledger unit.
             product = await self.session.scalar(select(ProductModel.id).where(
                 ProductModel.tenant_id == self.tenant_id, ProductModel.sku == sku))
             if not product:
@@ -98,7 +110,8 @@ class StockService:
             if quantity > 2_147_483_647:
                 raise ValueError('Quantity exceeds supported stock limit')
             costing = await apply_costing(self.session, self.tenant_id, row, operation, amount,
-                config.costing_method, unit_cost_cents, lot_number, expiration_date, received_at, quarantined)
+                config.costing_method, unit_cost_cents, lot_number, expiration_date, received_at, quarantined,
+                receipt_value_cents=receipt_total)
             changed = await self.session.execute(update(StockModel).where(
                 StockModel.id == row.id, StockModel.tenant_id == self.tenant_id,
                 StockModel.version == version).values(quantity=quantity, allocated=allocated,
@@ -110,6 +123,10 @@ class StockService:
                       'available': quantity - allocated, 'version': version + 1, **costing}
             if reference:
                 result['reference'] = reference
+            if conversion:
+                result['inputUom'] = conversion
+                if operation == 'receive':
+                    result['receiptValueCents'] = receipt_total
             self.session.add(StockMovementModel(tenant_id=self.tenant_id, mutation_id=mutation_id,
                 actor_id=self.actor_id, sku=sku, location_id=location, operation=operation,
                 amount=amount, request=fingerprint, result=result))

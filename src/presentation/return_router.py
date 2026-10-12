@@ -1,6 +1,8 @@
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from pydantic import BaseModel, Field, field_validator, AliasChoices
+from pydantic import BaseModel, Field, field_validator, AliasChoices, model_validator
+from src.presentation.base_unit_contract import BaseUnitDTO
+from src.presentation.stock_router import UnitQuantity, UnitCode
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.database import get_db_session
@@ -14,7 +16,7 @@ from src.domain.product.layer_costing import utc
 router = APIRouter(prefix='/returns', tags=['returns and write-offs'])
 
 
-class ReturnLineDTO(BaseModel):
+class ReturnLineDTO(BaseUnitDTO):
     layerId: str = Field(min_length=1, max_length=100)
     quantity: int = Field(gt=0, le=2_147_483_647, strict=True)
     disposition: Literal['RESTOCK', 'QUARANTINE', 'SCRAP', 'RETURN_TO_VENDOR'] | None = None
@@ -35,7 +37,7 @@ class CommandDTO(BaseModel):
     reason: str = Field(min_length=1, max_length=500, pattern=r'\S')
 
 
-class ReceiptLineDTO(BaseModel):
+class ReceiptLineDTO(BaseUnitDTO):
     layerId: str = Field(min_length=1, max_length=100)
     quantity: int = Field(gt=0, le=2_147_483_647, strict=True)
 
@@ -49,7 +51,9 @@ class ReceiveReturnDTO(BaseModel):
 class WriteOffDTO(BaseModel):
     sku: str = Field(min_length=1, max_length=100)
     locationId: str = Field(default='default', min_length=1, max_length=100)
-    quantity: int = Field(gt=0, le=2_147_483_647, strict=True)
+    quantity: UnitQuantity
+    unit: UnitCode | None = None
+    uomVersion: int | None = Field(default=None, ge=0, strict=True)
     expectedVersion: int = Field(ge=0, strict=True)
     layerId: str | None = Field(default=None, min_length=1, max_length=100)
     lotNumber: str | None = Field(default=None, min_length=1, max_length=100)
@@ -57,6 +61,14 @@ class WriteOffDTO(BaseModel):
     reason: str = Field(min_length=1, max_length=500, pattern=r'\S')
     reference: str | None = Field(default=None, min_length=1, max_length=200)
     mutationId: str = Field(min_length=1, max_length=100)
+
+    @model_validator(mode='after')
+    def quantity_contract(self):
+        if not self.unit and (type(self.quantity) is not int or not 0 < self.quantity <= 2_147_483_647):
+            raise ValueError('Quantity must be a positive integer when no unit is supplied')
+        if self.unit and self.uomVersion is None:
+            raise ValueError('Unit-bearing write-offs require uomVersion')
+        return self
 
 
 class ResolveDTO(CommandDTO):

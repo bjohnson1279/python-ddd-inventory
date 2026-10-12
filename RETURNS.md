@@ -90,8 +90,9 @@ Dedicated return creation/approval and write-off screens remain future work.
 
 These workflows record inventory/cost effects and references. They do not issue
 cash refunds, settle supplier credits, post financial journals or send vendor
-messages. Tax, foreign currencies, fractional UOMs and serial lifecycles remain
-outside this implementation.
+messages. Tax, foreign currencies and serial lifecycles remain outside this
+implementation. Named-unit write-offs and exact-value cost layers are now
+implemented in `TRANSFERS_UOM.md`; RMA lines remain integral base quantities.
 
 ## Verification
 

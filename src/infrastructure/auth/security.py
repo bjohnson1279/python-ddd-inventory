@@ -18,14 +18,15 @@ PERMISSIONS = {
     'reports:read', 'reports:write', 'notifications:self', 'users:manage', 'supplier:portal',
     'procurement:read', 'procurement:write',
     'returns:read', 'returns:write',
+    'transfers:read', 'transfers:write', 'uom:read', 'uom:write',
 }
-READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read', 'returns:read'}
+READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read', 'returns:read', 'transfers:read', 'uom:read'}
 ROLE_PERMISSIONS = {
     'ADMIN': PERMISSIONS - {'supplier:portal'},
     'MANAGER': PERMISSIONS - {'users:manage', 'supplier:portal'},
     'USER': READ, 'VIEWER': READ,
     'WAREHOUSE_OPERATOR': {'identity:self', 'catalog:read', 'inventory:read', 'inventory:write',
-                           'counts:read', 'counts:submit', 'notifications:self'},
+                           'counts:read', 'counts:submit', 'notifications:self', 'transfers:read', 'transfers:write', 'uom:read'},
     'ACCOUNTANT': READ | {'accounting:write'},
     'SUPPLIER_USER': {'identity:self', 'supplier:portal'},
 }
@@ -55,6 +56,10 @@ def permission_for(path, method):
         return 'identity:self'
     if path.startswith('/supplier-portal'):
         return 'supplier:portal'
+    if path.startswith('/inventory/transfers'):
+        return 'transfers:read' if read else 'transfers:write'
+    if path.startswith('/uom'):
+        return 'uom:read' if read or path.endswith('/convert') else 'uom:write'
     if path.startswith('/returns'):
         return 'returns:read' if read else 'returns:write'
     if path.startswith(('/suppliers', '/purchase-orders', '/reorder-policies')):

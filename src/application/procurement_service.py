@@ -14,6 +14,7 @@ from src.infrastructure.procurement_models import (
 from src.infrastructure.product.models import ProductModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
 from src.infrastructure.cost_models import CostLayerModel
+from src.infrastructure.transfer_models import TransferModel
 from src.infrastructure.messaging.models import OutboxEventModel
 
 OPEN = ('SENT', 'ACKNOWLEDGED', 'SHIPPED', 'PARTIALLY_RECEIVED')
@@ -230,6 +231,12 @@ class ProcurementService:
                 key = (item['sku'], order.location_id)
                 incoming[key] = incoming.get(key, 0) + item['quantity'] - item['receivedQuantity']
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        for transfer in await self.session.scalars(select(TransferModel).where(TransferModel.tenant_id == self.tenant, TransferModel.status == 'DISPATCHED')):
+            for item in transfer.items:
+                usable = sum(batch['quantity'] for batch in item['batches'] if not batch['expirationDate'] or
+                             utc(datetime.fromisoformat(batch['expirationDate'])) > datetime.now(timezone.utc))
+                key = (item['sku'], transfer.destination_location_id)
+                incoming[key] = incoming.get(key, 0) + usable
         sold = {}
         for movement in await self.session.scalars(select(StockMovementModel).where(
             StockMovementModel.tenant_id == self.tenant, StockMovementModel.operation.in_(('dispatch', 'fulfill-allocation')),

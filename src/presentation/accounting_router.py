@@ -7,6 +7,7 @@ from src.infrastructure.auth.identity import current_tenant
 from src.infrastructure.auth.rbac import requires_roles, requires_permissions
 from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
+from src.infrastructure.transfer_models import TransferModel
 from src.infrastructure.product.models import ProductModel
 from src.infrastructure.messaging.models import OutboxEventModel
 from src.application.costing_service import locked_config, load_layers
@@ -58,8 +59,9 @@ async def save_config(data: ConfigDTO, request: Request, session: AsyncSession =
         if config.costing_method != data.costingMethod:
             stocked = await session.scalar(select(StockModel.id).where(
                 StockModel.tenant_id == tenant, StockModel.quantity > 0).limit(1))
-            if stocked:
-                raise HTTPException(409, 'Cannot change costing method while stock is on hand')
+            transit = await session.scalar(select(TransferModel.id).where(TransferModel.tenant_id == tenant, TransferModel.status == 'DISPATCHED').limit(1))
+            if stocked or transit:
+                raise HTTPException(409, 'Cannot change costing method while stock is on hand or in transit')
         config.costing_method = data.costingMethod
         config.accounting_method = data.accountingMethod
         await session.commit()
@@ -73,6 +75,7 @@ def layer_dto(layer):
     return {'id': layer.id, 'sku': layer.sku, 'locationId': layer.location_id,
             'initialQuantity': layer.initial_quantity, 'remainingQuantity': layer.remaining_quantity,
             'unitCostCents': layer.unit_cost_cents, 'remainingValueCents': layer.remaining_value_cents,
+            'initialValueCents': layer.initial_value_cents,
             'lotNumber': layer.lot_number, 'expirationDate': layer.expiration_date,
             'receivedAt': layer.received_at, 'quarantined': layer.quarantined,
             'costStatus': 'PRICED' if layer.unit_cost_cents is not None else 'UNPRICED'}
@@ -140,6 +143,31 @@ async def valuation_report(request: Request, locationId: str | None = None, meth
         configured = config.costing_method if config else 'FIFO'
         if method is not None and normalize_method(method).value != configured:
             raise HTTPException(409, 'Valuation reports use the configured carrying method; use a valuation preview to compare methods')
+        grouped = {row['sku']: row for row in rows}
+        products = {product.sku: product for product in await session.scalars(select(ProductModel).where(ProductModel.tenant_id == current_tenant(request)))}
+        transit_query = select(TransferModel).where(TransferModel.tenant_id == current_tenant(request), TransferModel.status == 'DISPATCHED')
+        if locationId is not None:
+            transit_query = transit_query.where(TransferModel.destination_location_id == locationId)
+        for transfer in await session.scalars(transit_query):
+            for item in transfer.items:
+                if any(batch['costCents'] is None for batch in item['batches']):
+                    raise HTTPException(409, 'Unpriced in-transit stock')
+                row = grouped.get(item['sku'])
+                if row is None:
+                    product = products.get(item['sku'])
+                    if not product:
+                        raise HTTPException(409, 'Transfer catalog reference is missing')
+                    row = grouped[item['sku']] = {'variantId': product.id, 'sku': product.sku, 'name': product.name,
+                        'costingMethod': configured, 'totalQuantity': 0, 'totalValueCents': 0, 'unitCostCents': 0}
+                row['inTransitQuantity'] = row.get('inTransitQuantity', 0) + item['quantity']
+                row['inTransitValueCents'] = row.get('inTransitValueCents', 0) + sum(batch['costCents'] for batch in item['batches'])
+        rows = list(grouped.values())
+        for row in rows:
+            row.setdefault('inTransitQuantity', 0)
+            row.setdefault('inTransitValueCents', 0)
+            row['totalOwnedQuantity'] = row['totalQuantity'] + row['inTransitQuantity']
+            row['totalOwnedValueCents'] = row['totalValueCents'] + row['inTransitValueCents']
+            validate_total_value(row['totalOwnedValueCents'])
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     return [{key: value for key, value in row.items() if not key.startswith('_')} for row in rows]
@@ -182,7 +210,11 @@ async def valuation(variant_id: str, request: Request, quantity: int | None = Qu
             total, remaining = 0, requested
             for layer in selected:
                 taken = min(remaining, layer.remaining_quantity)
-                total += half_up(layer.remaining_value_cents * taken, layer.remaining_quantity)
+                if layer.initial_value_cents is not None and (not config or config.costing_method != 'WAC'):
+                    consumed = layer.initial_quantity - layer.remaining_quantity
+                    total += half_up(layer.initial_value_cents * (consumed + taken), layer.initial_quantity) - half_up(layer.initial_value_cents * consumed, layer.initial_quantity)
+                else:
+                    total += half_up(layer.remaining_value_cents * taken, layer.remaining_quantity)
                 remaining -= taken
                 if not remaining:
                     break

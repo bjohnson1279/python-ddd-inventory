@@ -8,6 +8,7 @@ from src.application.stock_service import StockConflict, stock_dto
 from src.application.quarantine_service import record_quarantine_losses
 from src.domain.product.layer_costing import consume, redistribute_value, eligible_layers, utc, validate_total_value
 from src.domain.return_costing import allocate_cents, returned_cents
+from src.domain.uom import cost_groups
 from src.infrastructure.return_models import ReturnModel as RMA, ReturnActionModel as Action, QuarantineModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
 from src.infrastructure.cost_models import CostLayerModel
@@ -207,20 +208,12 @@ class ReturnService:
 
     async def restore(self, stock, source_layer, quantity, value, quarantined):
         layers = await load_layers(self.session, self.tenant, stock)
-        groups = [(quantity, None)] if value is None else []
-        if value is not None:
-            base, pennies = divmod(value, quantity)
-            if base + bool(pennies) > 2_147_483_647:
-                raise ValueError('Historical return unit cost exceeds supported limit')
-            if quantity - pennies:
-                groups.append((quantity - pennies, base))
-            if pennies:
-                groups.append((pennies, base + 1))
+        groups = cost_groups(quantity, value)
         created = []
         for count, cost in groups:
             layer = CostLayerModel(id=str(uuid.uuid4()), stock_id=stock.id, tenant_id=self.tenant,
                 sku=stock.sku, location_id=stock.location_id, initial_quantity=count, remaining_quantity=count,
-                unit_cost_cents=cost, remaining_value_cents=cost * count if cost is not None else None,
+                unit_cost_cents=cost, initial_value_cents=value, remaining_value_cents=value,
                 lot_number=source_layer.lot_number, expiration_date=source_layer.expiration_date,
                 received_at=datetime.now(timezone.utc), quarantined=quarantined)
             self.session.add(layer)
@@ -299,6 +292,12 @@ class ReturnService:
         return await self.receive(data, key)
 
     async def write_off(self, data, key):
+        data = dict(data)
+        conversion = None
+        if data.get('unit'):
+            from src.application.uom_service import convert_input
+            data['quantity'], conversion = await convert_input(self.session, self.tenant, data['sku'],
+                data['quantity'], data['unit'], data.get('uomVersion'))
         stock = await self.session.scalar(select(StockModel).where(StockModel.tenant_id == self.tenant,
             StockModel.sku == data['sku'], StockModel.location_id == data['locationId']))
         if not stock:
@@ -310,7 +309,8 @@ class ReturnService:
         return await self.change_stock(stock, -data['quantity'], 'write-off', {
             'reason': data['reason'], 'reasonCode': data['reasonCode'], 'reference': data.get('reference'),
             'inventoryValueChangeCents': -cost if cost is not None else None,
-            'writeOffCents': cost, 'cogsReversedCents': 0, 'consumedLayers': used, 'quarantineChanges': changes}, key)
+            'writeOffCents': cost, 'cogsReversedCents': 0, 'consumedLayers': used,
+            'quarantineChanges': changes, 'inputUom': conversion}, key)
 
     async def resolve(self, data, key):
         row = await self.owned(QuarantineModel, data['quarantine_id'])

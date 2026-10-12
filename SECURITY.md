@@ -112,6 +112,12 @@ The current outbox publisher/lifecycle remains unfinished.
 
 ## Verification and remaining work
 
+Transfer commands and UOM configurations now have explicit permissions and
+actor-bound retries. Operators can move goods but nested transfer cost snapshots
+are redacted; only managers/admins configure units. Forced PostgreSQL policies
+scope all three new tables and enforce owned product links. See
+`TRANSFERS_UOM.md` for tests and the pending local PostgreSQL contract run.
+
 Returns and write-offs require explicit read/write permissions. Their services
 verify owned source movements, purchase receipts and quarantine stock before
 retry replay. Forced PostgreSQL policies additionally enforce those parent

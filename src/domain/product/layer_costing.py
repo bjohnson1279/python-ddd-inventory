@@ -100,19 +100,25 @@ def consume(layers, quantity, method, now=None, lot_number=None, include_ineligi
         if remaining == 0:
             break
         taken = min(remaining, layer.remaining_quantity)
+        consumed_before = getattr(layer, 'initial_quantity', layer.remaining_quantity) - layer.remaining_quantity
         layer.remaining_quantity -= taken
         remaining -= taken
         known = layer.unit_cost_cents is not None
+        exact_value = getattr(layer, 'initial_value_cents', None)
+        taken_cost = taken * layer.unit_cost_cents if known else None
+        if known and exact_value is not None:
+            taken_cost = half_up(exact_value * (consumed_before + taken), layer.initial_quantity) - half_up(exact_value * consumed_before, layer.initial_quantity)
         if method != CostingMethod.WAC:
             if known:
-                cost = None if cost is None else cost + taken * layer.unit_cost_cents
-                layer.remaining_value_cents = layer.remaining_quantity * layer.unit_cost_cents
+                cost = None if cost is None else cost + taken_cost
+                layer.remaining_value_cents = (exact_value - half_up(exact_value * (consumed_before + taken), layer.initial_quantity)
+                    if exact_value is not None else layer.remaining_quantity * layer.unit_cost_cents)
             else:
                 cost = None
                 if layer.remaining_quantity == 0:
                     layer.remaining_value_cents = 0
         consumptions.append({'layerId': layer.id, 'lotNumber': layer.lot_number, 'quantity': taken,
-            'costCents': taken * layer.unit_cost_cents if known and method != CostingMethod.WAC else None})
+            'costCents': taken_cost if known and method != CostingMethod.WAC else None})
     if method == CostingMethod.WAC:
         from src.domain.return_costing import allocate_cents
         values = allocate_cents(cost, [item['quantity'] for item in consumptions])

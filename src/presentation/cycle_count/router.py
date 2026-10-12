@@ -11,6 +11,7 @@ from src.infrastructure.cycle_count.models import CycleCountRecordModel, CycleCo
 from src.domain.cycle_count.services import ABCClassificationService
 from src.application.count_service import CountService, CountNotFound
 from src.application.stock_service import StockConflict
+from src.presentation.base_unit_contract import BaseUnitDTO
 
 router = APIRouter(prefix='/api/cycle-counts', tags=['CycleCount'])
 
@@ -37,7 +38,7 @@ class StartDTO(BaseModel):
     is_blind_count: bool = True
     mutation_id: str = Field(min_length=1, max_length=100)
 
-class SubmitCountLineItemDTO(BaseModel):
+class SubmitCountLineItemDTO(BaseUnitDTO):
     sku: str = Field(min_length=1, max_length=100)
     counted_quantity: int = Field(ge=0, le=2_147_483_647, strict=True)
 
@@ -57,7 +58,7 @@ class ReviewDTO(BaseModel):
     mutation_id: str = Field(min_length=1, max_length=100)
     location_id: str | None = Field(default=None, min_length=1, max_length=100)
 
-class AdjustmentDTO(BaseModel):
+class AdjustmentDTO(BaseUnitDTO):
     sku: str = Field(min_length=1, max_length=100)
     location_id: str = Field(default='default', min_length=1, max_length=100)
     delta: int = Field(strict=True, ge=-2_147_483_647, le=2_147_483_647)

@@ -10,12 +10,17 @@ async def install_tenant_policies(conn):
               'cycle_count_plans', 'cycle_count_records', 'python_count_requests',
               'python_suppliers', 'python_purchase_orders', 'python_procurement_actions',
               'python_reorder_policies', 'python_supplier_asns', 'python_returns',
-              'python_return_actions', 'python_return_quarantine']
+              'python_return_actions', 'python_return_quarantine', 'python_stock_transfers',
+              'python_inventory_actions', 'python_uom_configs']
     quote = conn.dialect.identifier_preparer.quote
     predicate = "tenant_id = current_setting('app.current_tenant_id', true)"
     for table in tables:
         name = quote(table)
         row_predicate = predicate
+        if table == 'python_uom_configs':
+            row_predicate += " AND EXISTS (SELECT 1 FROM products p WHERE p.sku = python_uom_configs.sku AND p.tenant_id = current_setting('app.current_tenant_id', true))"
+        if table == 'python_stock_transfers':
+            row_predicate += " AND NOT EXISTS (SELECT 1 FROM json_array_elements(python_stock_transfers.items) i WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.sku = i ->> 'sku' AND p.tenant_id = current_setting('app.current_tenant_id', true)))"
         if table == 'python_notifications':
             row_predicate += " AND EXISTS (SELECT 1 FROM python_users u WHERE u.id = user_id AND u.tenant_id = current_setting('app.current_tenant_id', true))"
         if table == 'python_cost_layers':

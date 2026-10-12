@@ -22,18 +22,26 @@ pricing retries.
 
 Costing accepts uppercase/lowercase method names and `weighted_average_cost` as
 an alias for WAC. Specific identification is not implemented. Quantities are
-discrete integers; purchase costs are nonnegative integer USD cents, including
+integral base units; named-unit conversions are described in `TRANSFERS_UOM.md`.
+Purchase costs are nonnegative integer USD cents per input unit, including
 explicit zero-cost goods. The catalog's selling price is never used as a guessed
 purchase cost. Unit costs are bounded at 2,147,483,647 cents; carrying values are
 bounded at JavaScript's exact-integer limit of 9,007,199,254,740,991 cents.
 
 The tenant-level write lock serializes method changes with stock mutations.
 Changing the costing method is rejected while any tenant stock is on hand;
-existing stock is not silently reinterpreted. Accounting-method settings are
+existing stock is not silently reinterpreted. In-transit stock also blocks a
+method change. Accounting-method settings are
 stored for shared-client compatibility. Cash/accrual financial journal posting,
 taxes, foreign currencies and financial writeoff journals are separate work.
 Original-cost returns and inventory write-offs are implemented in `RETURNS.md`.
 Reviewed physical counts adjust carrying value through `COUNTS.md`.
+
+Exact-value layers can now carry fractional-cent costs per base unit using
+immutable `initialValueCents` and cumulative consumption rounding. Their
+`unitCostCents` is a rounded display value; use carrying values for valuation.
+Valuation reports additionally expose in-transit and total-owned values; see
+`TRANSFERS_UOM.md` for conservation, migration and verification details.
 
 ## API
 

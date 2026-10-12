@@ -28,6 +28,7 @@ class CostLayerModel(Base):
     initial_quantity = Column(Integer, nullable=False)
     remaining_quantity = Column(Integer, nullable=False)
     unit_cost_cents = Column(BigInteger, nullable=True)
+    initial_value_cents = Column(BigInteger, nullable=True)
     remaining_value_cents = Column(BigInteger, nullable=True)
     lot_number = Column(String, nullable=True)
     expiration_date = Column(DateTime(timezone=True), nullable=True)
