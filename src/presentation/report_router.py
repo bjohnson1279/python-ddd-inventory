@@ -65,7 +65,8 @@ async def schedule_report(request: Request, id: str = Path(...), payload: Dict[s
     return {"success": True, "schedule": schedule}
 
 @router.get("/shared/{token}")
-async def get_shared_link(token: str = Path(...)):
+@requires_roles(['ADMIN', 'MANAGER', 'USER'])
+async def get_shared_link(request: Request, token: str = Path(...)):
     # Validate token to prevent path traversal
     if not re.match(r'^[a-zA-Z0-9_-]+$', token):
         raise HTTPException(status_code=400, detail="Invalid token format")
