@@ -155,3 +155,7 @@
 ## 2024-05-18 - Binary Search for Chronological Ledger Replay
 **Learning:** Reconstructing state from an event-sourced ledger requires filtering events up to a point in time. A linear scan is O(N), but since ledger events are inherently appended chronologically, using binary search (`bisect`) reduces this to O(log N).
 **Action:** Use binary search for filtering time-series or append-only chronologically ordered lists instead of list comprehensions.
+
+## 2024-05-24 - Optimize CRDT Value Reads to O(1)
+**Learning:** Frequent reads of a dynamic calculation (like summing values in CRDT dictionaries) can create a performance bottleneck if the data structures grow large.
+**Action:** Maintain an internal O(1) running total (`_cached_value`) that increments/decrements alongside state changes, avoiding O(N) traversals on every read. Recalculate the cached value only on bulk operations like `merge`.
