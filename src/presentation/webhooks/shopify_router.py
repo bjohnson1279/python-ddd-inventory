@@ -16,11 +16,8 @@ def get_webhook_security():
     return ShopifyWebhookSecurity(api_secret=api_secret)
 
 def get_channel_ingestion_service():
-    # Example mock dependency injection
-    class MockDispatchUseCase:
-        async def execute(self, sku, quantity, tenant_id, skip_publish_to_channel):
-            pass
-    return ChannelIngestionService(inventory_repository=None, dispatch_use_case=MockDispatchUseCase())
+    # Legacy protocol validation remains, but tenantless dispatch is disabled.
+    return None
 
 @router.post("/orders/create")
 async def handle_order_created(
@@ -46,25 +43,4 @@ async def handle_order_created(
     if x_shopify_topic != "orders/create":
         raise HTTPException(status_code=400, detail="Unsupported topic")
         
-    # We should normally check if this webhook was already processed to be idempotent
-    # if await processed_webhook_repo.exists(x_shopify_webhook_id):
-    #     return {"status": "already processed"}
-
-    order_payload = await request.json()
-    line_items = order_payload.get("line_items", [])
-    
-    # Normally tenant_id would be resolved from the shop domain or webhook headers
-    tenant_id = "default_tenant" 
-    external_order_id = str(order_payload.get("id", x_shopify_webhook_id))
-
-    try:
-        await ingestion_service.ingest_order(
-            channel_id="shopify",
-            external_order_id=external_order_id,
-            line_items=line_items,
-            tenant_id=tenant_id
-        )
-        return {"status": "Webhook processed"}
-    except Exception as e:
-        logger.error(f"Error processing Shopify webhook: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    raise HTTPException(501, 'Register a tenant-owned signed integration webhook')

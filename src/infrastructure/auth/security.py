@@ -22,6 +22,7 @@ PERMISSIONS = {
     'outbox:read', 'outbox:manage',
     'serials:read', 'serials:write', 'serials:configure', 'kits:read', 'kits:write', 'kits:configure',
     'finance:read', 'finance:write', 'finance:manage',
+    'integrations:read', 'integrations:manage',
 }
 READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read', 'returns:read', 'transfers:read', 'uom:read'}
 READ |= {'serials:read', 'kits:read'}
@@ -62,6 +63,8 @@ def permission_for(path, method):
         return 'identity:self'
     if path.startswith('/outbox'):
         return 'outbox:read' if read else 'outbox:manage'
+    if path.startswith(('/integrations', '/shopify')):
+        return 'integrations:read' if read else 'integrations:manage'
     if path.startswith('/serials'):
         if path.endswith('/price'):
             return 'accounting:write'
@@ -124,6 +127,8 @@ def stock_response(request, result):
 
 
 async def authorize_request(request: Request, session: AsyncSession = Depends(get_db_session)):
+    if request.method == 'POST' and request.url.path.startswith('/webhooks/integrations/') and request.url.path.endswith('/orders'):
+        return  # Connection-specific HMAC is enforced by the webhook handler.
     if (request.method, request.url.path) in PUBLIC:
         return
     claims = getattr(request.state, 'claims', None)

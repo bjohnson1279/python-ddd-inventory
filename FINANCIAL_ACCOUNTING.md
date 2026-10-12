@@ -163,8 +163,9 @@ general-ledger panel provides opening preview/activation, trial balance,
 reconciliation and closing controls. Accountant ledger loading is independent of
 warehouse/catalog permissions. Date-only journal values retain their UTC fiscal
 day in the browser. Commercial documents/credits/refunds/source-resolution methods
-are available in the adapter; dedicated billing/review screens and ERP consumers
-remain follow-up work.
+are available in the adapter; dedicated billing/review screens remain follow-up
+work. [Integration destinations](INTEGRATIONS.md) now deliver journals through a
+signed, acknowledged HTTP connector contract; native ERP adapters remain separate.
 
 ## Verification (2026-10-12)
 

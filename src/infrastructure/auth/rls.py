@@ -14,12 +14,19 @@ async def install_tenant_policies(conn):
               'python_inventory_actions', 'python_uom_configs', 'python_outbox_streams',
               'python_serial_tracking', 'python_serials', 'python_kits', 'python_kit_builds',
               'python_ledger_state', 'python_journals', 'python_journal_lines', 'python_financial_sources',
-              'python_financial_documents', 'python_document_sources', 'python_financial_settlements', 'python_financial_credits']
+              'python_financial_documents', 'python_document_sources', 'python_financial_settlements', 'python_financial_credits',
+              'python_integration_connections', 'python_integration_orders', 'python_integration_receipts', 'python_integration_deliveries']
     quote = conn.dialect.identifier_preparer.quote
     predicate = "tenant_id = current_setting('app.current_tenant_id', true)"
     for table in tables:
         name = quote(table)
         row_predicate = predicate
+        if table in ('python_integration_orders', 'python_integration_receipts', 'python_integration_deliveries'):
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_integration_connections parent WHERE parent.id = {name}.connection_id AND parent.tenant_id = {name}.tenant_id)"
+        if table == 'python_integration_deliveries':
+            row_predicate += f" AND EXISTS (SELECT 1 FROM outbox_events parent WHERE parent.id = {name}.event_id AND parent.payload->>'tenantId' = {name}.tenant_id)"
+        if table == 'python_integration_receipts':
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_integration_orders parent WHERE parent.id = {name}.order_id AND parent.tenant_id = {name}.tenant_id AND parent.connection_id = {name}.connection_id)"
         if table == 'python_journals':
             row_predicate += " AND (source_id IS NULL OR EXISTS (SELECT 1 FROM python_stock_movements m WHERE m.id = python_journals.source_id AND m.tenant_id = current_setting('app.current_tenant_id', true)))"
         if table == 'python_journal_lines':

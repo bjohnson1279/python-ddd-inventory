@@ -28,8 +28,7 @@ def test_amazon_webhook_subscription_confirmation():
         headers={"x-amz-sns-message-type": "SubscriptionConfirmation"},
         json={"SubscribeURL": "https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription"}
     )
-    assert response.status_code == 200
-    assert response.json() == {"status": "Subscription confirmed manually"}
+    assert response.status_code == 501
 
 def test_amazon_webhook_invalid_signature():
     mock_sec = MagicMock()
@@ -123,7 +122,7 @@ def test_amazon_webhook_unhandled_message_type():
     assert response.status_code == 200
     assert response.json() == {"status": "Unhandled message type"}
 
-def test_amazon_webhook_success():
+def test_amazon_legacy_webhook_cannot_report_mock_success():
     mock_sec = MagicMock()
     mock_sec.validate_sns_signature.return_value = True
     
@@ -156,5 +155,4 @@ def test_amazon_webhook_success():
     
     app.dependency_overrides.clear()
     
-    assert response.status_code == 200
-    assert response.json() == {"status": "Webhook processed"}
+    assert response.status_code == 501

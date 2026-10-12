@@ -79,6 +79,10 @@ app.include_router(serial_kit_router, prefix='/api')
 from src.presentation.financial_router import router as financial_router
 app.include_router(financial_router)
 app.include_router(financial_router, prefix='/api')
+from src.presentation.integration_router import router as integration_router, webhooks as integration_webhooks
+app.include_router(integration_router)
+app.include_router(integration_router, prefix='/api')
+app.include_router(integration_webhooks)
 from src.presentation.catalog_router import router as catalog_router
 app.include_router(catalog_router)
 app.include_router(catalog_router, prefix='/api')

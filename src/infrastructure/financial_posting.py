@@ -48,9 +48,12 @@ def post_journal(connection, tenant, *, date, description, actor, lines, kind='M
         'description': description, 'method': state['method'], 'kind': kind, 'actorId': actor,
         'referenceId': reference, 'sourceId': source_id, 'lines': snapshot}
     key, sequence = allocate_sequence(connection, tenant, 'Journal', identifier)
-    connection.execute(OutboxEventModel.__table__.insert().values(id=str(uuid.uuid4()),
+    event_id = str(uuid.uuid4())
+    connection.execute(OutboxEventModel.__table__.insert().values(id=event_id,
         aggregate_type='Journal', aggregate_id=identifier, event_type='JournalEntryPosted', payload=payload,
         created_at=now, status='PENDING', attempts=0, cycle_attempts=0, version=0, stream_key=key, sequence=sequence))
+    from src.infrastructure.integration_models import enqueue_deliveries
+    enqueue_deliveries(connection, event_id, tenant, 'JournalEntryPosted', payload)
     return identifier
 
 

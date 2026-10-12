@@ -52,7 +52,7 @@ def test_webhook_unsupported_topic(mock_security):
     assert response.status_code == 400
     assert response.json() == {"detail": "Unsupported topic"}
 
-def test_webhook_success():
+def test_legacy_webhook_cannot_report_mock_success():
     # Mock security
     mock_sec_instance = MagicMock()
     mock_sec_instance.validate_hmac.return_value = True
@@ -84,10 +84,8 @@ def test_webhook_success():
     
     app.dependency_overrides.clear()
     
-    assert response.status_code == 200
-    assert response.json() == {"status": "Webhook processed"}
-    # mock_ingestion_instance.ingest_order was a function so we can't easily assert_called_once_with without wrapping in a Mock or AsyncMock
-    # let's just assume it passed since 200 is returned.
+    assert response.status_code == 501
+    # Even injected no-op ingestion cannot turn the retired route into success.
 
 def test_get_webhook_security_env_var(monkeypatch):
     monkeypatch.setenv("SHOPIFY_API_SECRET", "test_env_secret")
