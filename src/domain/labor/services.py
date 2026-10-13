@@ -18,8 +18,14 @@ class OperatorPerformanceService:
         distance_meters: float
     ) -> OperatorPerformanceKpi:
         
-        picks_per_hour = total_picks / hours_worked if hours_worked > 0 else 0.0
-        accuracy = (accurate_counts / total_counts) * 100.0 if total_counts > 0 else 100.0
+        if any(type(value) is not int or value < 0 for value in (total_picks, accurate_counts, total_counts)):
+            raise ValueError('Activity counts must be nonnegative integers')
+        if any(not math.isfinite(value) or value < 0 for value in (hours_worked, distance_meters)) or accurate_counts > total_counts:
+            raise ValueError('Invalid activity measurements')
+        if total_picks and hours_worked == 0:
+            raise ValueError('Picks require a positive measured duration')
+        picks_per_hour = total_picks / hours_worked if hours_worked > 0 else None
+        accuracy = (accurate_counts / total_counts) * 100.0 if total_counts > 0 else None
         
         return OperatorPerformanceKpi(
             operator_id=operator_id,
@@ -40,15 +46,16 @@ class PredictiveSchedulingEngine:
     ) -> PredictiveStaffingSchedule:
         
         # Simple heuristic: total volume divided by average picks per shift
+        if any(type(value) is not int or value < 0 for value in (projected_inbound_volume, projected_outbound_volume)):
+            raise ValueError('Projected volumes must be nonnegative integers')
+        if any(not math.isfinite(value) or value <= 0 for value in (average_operator_target_picks, shift_duration_hours)):
+            raise ValueError('Staffing target and duration must be finite and positive')
         total_volume = projected_inbound_volume + projected_outbound_volume
-        
         picks_per_shift = average_operator_target_picks * shift_duration_hours
-        
-        if picks_per_shift > 0:
-            recommended_headcount = math.ceil(total_volume / picks_per_shift)
-        else:
-            recommended_headcount = 0
-            
+        if not math.isfinite(picks_per_shift) or picks_per_shift <= 0:
+            raise ValueError('Invalid staffing capacity')
+        recommended_headcount = math.ceil(total_volume / picks_per_shift)
+
         return PredictiveStaffingSchedule(
             schedule_id=str(uuid.uuid4()),
             target_date=target_date,

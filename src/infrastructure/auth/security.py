@@ -24,6 +24,7 @@ PERMISSIONS = {
     'finance:read', 'finance:write', 'finance:manage',
     'integrations:read', 'integrations:manage',
     'alerts:read', 'alerts:manage',
+    'workforce:self', 'workforce:manage',
 }
 READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read', 'returns:read', 'transfers:read', 'uom:read'}
 READ |= {'serials:read', 'kits:read'}
@@ -39,6 +40,7 @@ ROLE_PERMISSIONS = {
 }
 ROLE_PERMISSIONS['WAREHOUSE_OPERATOR'] |= {'serials:read', 'serials:write', 'kits:read', 'kits:write'}
 ROLE_PERMISSIONS['WAREHOUSE_OPERATOR'] |= {'alerts:read'}
+ROLE_PERMISSIONS['WAREHOUSE_OPERATOR'] |= {'workforce:self'}
 ROLE_PERMISSIONS['ACCOUNTANT'] |= {'finance:read', 'finance:write', 'finance:manage'}
 ROLE_PERMISSIONS['ACCOUNTANT'] |= {'reports:write'}
 PUBLIC = {('GET', '/health'), ('GET', '/api/health'), ('POST', '/auth/setup'), ('POST', '/auth/login'),
@@ -61,6 +63,10 @@ def tenant_selectors(value, tenant):
 def permission_for(path, method):
     path = path.removeprefix('/api') if path.startswith('/api/') else path
     read = method in ('GET', 'HEAD')
+    if path.startswith('/workforce'):
+        if path in ('/workforce/me', '/workforce/shifts') and read or '/shifts/' in path and (read or path.endswith(('/start', '/complete', '/activities'))):
+            return 'workforce:self'
+        return 'workforce:manage'
     if path.startswith('/users') or path.startswith('/roles'):
         return 'users:manage'
     if path.startswith('/auth/'):

@@ -177,3 +177,11 @@ Custom role editing, MFA/SSO, account-recovery delivery,
 public report sharing and active WebSocket
 authorization remain additional work. No store database was migrated or service
 deployed during this change.
+
+Workforce refinement adds explicit self/manager permissions. Operators access
+only their own profile, shifts and source-backed activities; managers inspect
+tenant records. User administration and workforce writes share a tenant lock so
+disable/role edits serialize with eligibility checks. Four workforce tables have
+forced PostgreSQL RLS with owned user/profile/shift/movement/count parent checks.
+Task source identity is unique and task measurements are immutable under both
+SQLite and PostgreSQL. See [workforce refinements](WORKFORCE.md).

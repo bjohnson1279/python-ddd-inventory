@@ -58,6 +58,9 @@ app.include_router(auth_router, prefix='/api')
 from src.presentation.users_router import router as users_router
 app.include_router(users_router)
 app.include_router(users_router, prefix='/api')
+from src.presentation.workforce_router import router as workforce_router
+app.include_router(workforce_router)
+app.include_router(workforce_router, prefix='/api')
 from src.presentation.stock_router import router as stock_router
 app.include_router(stock_router)
 app.include_router(stock_router, prefix='/api')

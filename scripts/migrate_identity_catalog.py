@@ -21,6 +21,7 @@ from src.infrastructure.serial_kit_models import TrackingModel, SerialModel, Kit
 from src.infrastructure.financial_models import LedgerStateModel, JournalModel, JournalLineModel, FinancialSourceModel, FinancialDocumentModel, DocumentSourceModel, SettlementModel, FinancialCreditModel
 from src.infrastructure.integration_models import IntegrationConnection, IntegrationOrder, IntegrationReceipt, IntegrationDelivery
 from src.infrastructure.report_alert_models import ReportJob, ReportSchedule, AlertConfig, AlertCondition, AlertNotice
+from src.infrastructure.workforce_models import OperatorProfile, LaborShift, TaskPerformance, StaffingPlan
 from src.infrastructure.catalog_models import CatalogModel, VariantLinkModel, BarcodeModel
 from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 from src.infrastructure.procurement_models import SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel
@@ -39,7 +40,8 @@ async def create_related(conn):
                   LedgerStateModel, JournalModel, JournalLineModel, FinancialSourceModel,
                   FinancialDocumentModel, DocumentSourceModel, SettlementModel, FinancialCreditModel,
                   IntegrationConnection, IntegrationOrder, IntegrationReceipt, IntegrationDelivery,
-                  ReportJob, ReportSchedule, AlertConfig, AlertCondition, AlertNotice):
+                  ReportJob, ReportSchedule, AlertConfig, AlertCondition, AlertNotice,
+                  OperatorProfile, LaborShift, TaskPerformance, StaffingPlan):
         await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
     upgrades = {
         'python_notifications': {'link': 'VARCHAR'},

@@ -84,7 +84,7 @@ jobs:
       - name: Verify migration, costing, tenant isolation and concurrent writes
         env:
           COSTING_TEST_DATABASE_URL: postgresql+asyncpg://postgres:costing-test-only@127.0.0.1:5432/costing_test
-        run: pytest tests/infrastructure/test_costing_postgres.py tests/infrastructure/test_security_postgres.py tests/infrastructure/test_procurement_postgres.py tests/infrastructure/test_return_concurrency.py tests/infrastructure/test_transfer_uom_concurrency.py tests/infrastructure/test_outbox_contract.py tests/infrastructure/test_outbox_migration.py tests/infrastructure/test_serial_kit_concurrency.py tests/infrastructure/test_financial_concurrency.py tests/infrastructure/test_integration_concurrency.py tests/infrastructure/test_reporting_concurrency.py -q --tb=short
+        run: pytest tests/infrastructure/test_costing_postgres.py tests/infrastructure/test_security_postgres.py tests/infrastructure/test_procurement_postgres.py tests/infrastructure/test_return_concurrency.py tests/infrastructure/test_transfer_uom_concurrency.py tests/infrastructure/test_outbox_contract.py tests/infrastructure/test_outbox_migration.py tests/infrastructure/test_serial_kit_concurrency.py tests/infrastructure/test_financial_concurrency.py tests/infrastructure/test_integration_concurrency.py tests/infrastructure/test_reporting_concurrency.py tests/infrastructure/test_workforce_concurrency.py -q --tb=short
 
   kafka-delivery:
     name: Acknowledged Kafka outbox delivery

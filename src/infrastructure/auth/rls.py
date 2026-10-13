@@ -16,12 +16,21 @@ async def install_tenant_policies(conn):
               'python_ledger_state', 'python_journals', 'python_journal_lines', 'python_financial_sources',
               'python_financial_documents', 'python_document_sources', 'python_financial_settlements', 'python_financial_credits',
               'python_integration_connections', 'python_integration_orders', 'python_integration_receipts', 'python_integration_deliveries',
-              'python_report_jobs', 'python_report_schedules', 'python_alert_config', 'python_alert_conditions', 'python_alert_notices']
+              'python_report_jobs', 'python_report_schedules', 'python_alert_config', 'python_alert_conditions', 'python_alert_notices',
+              'python_operator_profiles', 'python_labor_shifts', 'python_task_performance', 'python_staffing_plans']
     quote = conn.dialect.identifier_preparer.quote
     predicate = "tenant_id = current_setting('app.current_tenant_id', true)"
     for table in tables:
         name = quote(table)
         row_predicate = predicate
+        if table == 'python_operator_profiles':
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_users parent WHERE parent.id={name}.user_id AND parent.tenant_id={name}.tenant_id)"
+        if table == 'python_labor_shifts':
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_operator_profiles parent WHERE parent.id={name}.operator_id AND parent.tenant_id={name}.tenant_id)"
+        if table == 'python_task_performance':
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_labor_shifts parent WHERE parent.id={name}.shift_id AND parent.tenant_id={name}.tenant_id)"
+            row_predicate += f" AND (movement_id IS NULL OR EXISTS (SELECT 1 FROM python_stock_movements parent WHERE parent.id={name}.movement_id AND parent.tenant_id={name}.tenant_id))"
+            row_predicate += f" AND (count_id IS NULL OR EXISTS (SELECT 1 FROM cycle_count_records parent WHERE parent.id={name}.count_id AND parent.tenant_id={name}.tenant_id))"
         if table in ('python_report_jobs', 'python_report_schedules'):
             row_predicate += f" AND EXISTS (SELECT 1 FROM python_report_definitions parent WHERE parent.id={name}.report_id AND parent.tenant_id={name}.tenant_id)"
             actor = 'requested_by' if table == 'python_report_jobs' else 'created_by'
