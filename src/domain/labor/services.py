@@ -1,9 +1,8 @@
 import uuid
 import math
-from typing import List
 from datetime import date
 from .entity import (
-    OperatorProfile, OperatorPerformanceKpi, PredictiveStaffingSchedule
+    OperatorPerformanceKpi, PredictiveStaffingSchedule
 )
 
 class OperatorPerformanceService:
