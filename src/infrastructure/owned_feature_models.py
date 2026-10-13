@@ -18,6 +18,7 @@ class NotificationModel(Base):
     tenant_id = Column(String, nullable=False, index=True)
     user_id = Column(String, ForeignKey('python_users.id'), nullable=False)
     message = Column(String, nullable=False)
+    link = Column(String, nullable=True)
     status = Column(String, nullable=False, default='UNREAD')
     snoozed_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))

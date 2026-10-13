@@ -142,6 +142,10 @@ app.include_router(product_router)
 app.include_router(cycle_count_router)
 from src.presentation.report_router import router as report_router
 app.include_router(report_router)
+app.include_router(report_router, prefix='/api')
+from src.presentation.alert_router import router as alert_router
+app.include_router(alert_router)
+app.include_router(alert_router, prefix='/api')
 from src.presentation.supplier_portal.router import router as supplier_portal_router
 app.include_router(supplier_portal_router)
 app.include_router(graphql_app, prefix="/graphql")
@@ -156,9 +160,11 @@ app.include_router(amazon_webhook_router)
 
 from src.presentation.notification.router import router as notification_router
 app.include_router(notification_router)
+app.include_router(notification_router, prefix='/api')
 
 from src.presentation.aging.router import router as aging_router
 app.include_router(aging_router)
+app.include_router(aging_router, prefix='/api')
 
 @app.get('/health')
 async def health_check():

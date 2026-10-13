@@ -15,8 +15,10 @@ async def test_create_and_list_owned_reports(client):
 async def test_execute_and_schedule_require_owned_report_and_real_jobs(client):
     assert client.post('/reports/missing/execute', json={'format': 'json'}).status_code == 404
     report = client.post('/reports/', json={'name': 'Report'}).json()['report']
-    assert client.post('/reports/' + report['id'] + '/execute', json={'format': 'json'}).status_code == 501
-    assert client.post('/reports/' + report['id'] + '/schedule', json={'cronExpression': '0 0 * * *'}).status_code == 501
+    execution = client.post('/reports/' + report['id'] + '/execute', json={'format': 'json'})
+    assert execution.status_code == 202
+    assert execution.json()['execution']['status'] == 'QUEUED'
+    assert client.post('/reports/' + report['id'] + '/schedule', json={'cronExpression': '0 0 * * *'}).status_code == 200
 
 
 @pytest.mark.asyncio

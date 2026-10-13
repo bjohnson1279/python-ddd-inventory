@@ -23,7 +23,7 @@ async def test_start_and_loop(worker):
             await worker.stop()
 
     with patch("asyncio.sleep", side_effect=mock_sleep):
-        with patch.object(worker, "tick", wraps=worker.tick) as mock_tick:
+        with patch.object(worker, "tick", new_callable=AsyncMock) as mock_tick:
             await worker.start()
             assert mock_tick.call_count == 2
             assert worker.is_running is False
@@ -35,10 +35,6 @@ async def test_stop(worker):
     assert worker.is_running is False
 
 @pytest.mark.asyncio
-async def test_tick_handles_exception(worker):
-    with patch("src.application.workers.report_scheduler_worker.datetime") as mock_datetime:
-        mock_datetime.utcnow.side_effect = Exception("Test exception in tick")
-        with patch("src.application.workers.report_scheduler_worker.logger.error") as mock_logger_error:
-            await worker.tick()
-            mock_logger_error.assert_called_once()
-            assert "Error in ReportSchedulerWorker tick: Test exception in tick" in mock_logger_error.call_args[0][0]
+async def test_tick_requires_tenant_and_persistent_session(worker):
+    with pytest.raises(ValueError, match='session and tenant'):
+        await worker.tick()

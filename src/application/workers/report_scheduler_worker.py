@@ -5,8 +5,9 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 class ReportSchedulerWorker:
-    def __init__(self, db_session=None):
+    def __init__(self, db_session=None, tenant_id=None):
         self.db = db_session
+        self.tenant_id = tenant_id
         self.is_running = False
 
     async def start(self) -> None:
@@ -20,20 +21,8 @@ class ReportSchedulerWorker:
         self.is_running = False
         logger.info("ReportSchedulerWorker stopped")
 
-    async def tick(self) -> None:
-        try:
-            now = datetime.utcnow()
-            # Fetch due schedules
-            # due_schedules = await self.db.fetch("SELECT * FROM report_schedules WHERE nextRunAt <= ?", now)
-            due_schedules = [] # Mock
-
-            for schedule in due_schedules:
-                # Trigger report execution
-                # await self.db.execute("INSERT INTO outbox_events (event_name, payload) VALUES ('ReportExecutionRequested', ?)", json.dumps({'executionId': new_exec_id}))
-                
-                # Update next run at using cron string
-                # next_run_at = calculate_next_cron(schedule['cronExpression'])
-                # await self.db.execute("UPDATE report_schedules SET nextRunAt = ? WHERE id = ?", next_run_at, schedule['id'])
-                pass
-        except Exception as e:
-            logger.error(f"Error in ReportSchedulerWorker tick: {e}")
+    async def tick(self):
+        if self.db is None or not self.tenant_id:
+            raise ValueError('Persisted scheduler session and tenant are required')
+        from src.application.report_service import scheduler_tick
+        return await scheduler_tick(self.db, self.tenant_id)

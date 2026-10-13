@@ -20,6 +20,7 @@ from src.infrastructure.messaging.models import OutboxEventModel, OutboxStreamMo
 from src.infrastructure.serial_kit_models import TrackingModel, SerialModel, KitModel, KitBuildModel
 from src.infrastructure.financial_models import LedgerStateModel, JournalModel, JournalLineModel, FinancialSourceModel, FinancialDocumentModel, DocumentSourceModel, SettlementModel, FinancialCreditModel
 from src.infrastructure.integration_models import IntegrationConnection, IntegrationOrder, IntegrationReceipt, IntegrationDelivery
+from src.infrastructure.report_alert_models import ReportJob, ReportSchedule, AlertConfig, AlertCondition, AlertNotice
 from src.infrastructure.catalog_models import CatalogModel, VariantLinkModel, BarcodeModel
 from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 from src.infrastructure.procurement_models import SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel
@@ -37,9 +38,11 @@ async def create_related(conn):
                   TrackingModel, SerialModel, KitModel, KitBuildModel,
                   LedgerStateModel, JournalModel, JournalLineModel, FinancialSourceModel,
                   FinancialDocumentModel, DocumentSourceModel, SettlementModel, FinancialCreditModel,
-                  IntegrationConnection, IntegrationOrder, IntegrationReceipt, IntegrationDelivery):
+                  IntegrationConnection, IntegrationOrder, IntegrationReceipt, IntegrationDelivery,
+                  ReportJob, ReportSchedule, AlertConfig, AlertCondition, AlertNotice):
         await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
     upgrades = {
+        'python_notifications': {'link': 'VARCHAR'},
         'outbox_events': {'status': "VARCHAR NOT NULL DEFAULT 'PENDING'",
             'attempts': 'INTEGER NOT NULL DEFAULT 0', 'cycle_attempts': 'INTEGER NOT NULL DEFAULT 0',
             'version': 'INTEGER NOT NULL DEFAULT 0', 'next_attempt_at': 'TIMESTAMP',

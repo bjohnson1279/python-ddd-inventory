@@ -167,6 +167,15 @@ are available in the adapter; dedicated billing/review screens remain follow-up
 work. [Integration destinations](INTEGRATIONS.md) now deliver journals through a
 signed, acknowledged HTTP connector contract; native ERP adapters remain separate.
 
+## Scheduled financial snapshots (2026-10-13)
+
+Trial balance, income statement and balance sheet now participate in durable
+report jobs and UTC schedules, with protected JSON/CSV downloads. Snapshots
+retain the accounting method, exact cents and source-quality flags. Creator
+permissions are rechecked during generation and current permissions on download.
+See [reporting and alerts](REPORTING_ALERTS.md). Dedicated settlement review and
+statutory reporting remain separate follow-up work.
+
 ## Verification (2026-10-12)
 
 The full Python suite passed with 506 tests and 10 optional integration skips.

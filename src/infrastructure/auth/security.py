@@ -23,9 +23,11 @@ PERMISSIONS = {
     'serials:read', 'serials:write', 'serials:configure', 'kits:read', 'kits:write', 'kits:configure',
     'finance:read', 'finance:write', 'finance:manage',
     'integrations:read', 'integrations:manage',
+    'alerts:read', 'alerts:manage',
 }
 READ = {'identity:self', 'catalog:read', 'inventory:read', 'accounting:read', 'reports:read', 'notifications:self', 'procurement:read', 'returns:read', 'transfers:read', 'uom:read'}
 READ |= {'serials:read', 'kits:read'}
+READ |= {'alerts:read'}
 ROLE_PERMISSIONS = {
     'ADMIN': PERMISSIONS - {'supplier:portal'},
     'MANAGER': PERMISSIONS - {'users:manage', 'supplier:portal'},
@@ -36,7 +38,9 @@ ROLE_PERMISSIONS = {
     'SUPPLIER_USER': {'identity:self', 'supplier:portal'},
 }
 ROLE_PERMISSIONS['WAREHOUSE_OPERATOR'] |= {'serials:read', 'serials:write', 'kits:read', 'kits:write'}
+ROLE_PERMISSIONS['WAREHOUSE_OPERATOR'] |= {'alerts:read'}
 ROLE_PERMISSIONS['ACCOUNTANT'] |= {'finance:read', 'finance:write', 'finance:manage'}
+ROLE_PERMISSIONS['ACCOUNTANT'] |= {'reports:write'}
 PUBLIC = {('GET', '/health'), ('GET', '/api/health'), ('POST', '/auth/setup'), ('POST', '/auth/login'),
           ('POST', '/api/auth/setup'), ('POST', '/api/auth/login'),
           ('POST', '/webhooks/shopify/orders/create'), ('POST', '/webhooks/woocommerce/orders/create'),
@@ -92,11 +96,19 @@ def permission_for(path, method):
         return 'procurement:read' if read else 'procurement:write'
     if path.startswith('/notifications'):
         return 'notifications:self'
+    if path.startswith('/alerts'):
+        return 'alerts:read' if read else 'alerts:manage'
     if path.startswith('/cycle-counts'):
         if path.endswith(('/plans', '/schedule', '/classify', '/start', '/approve', '/recount', '/adjust')):
             return 'counts:manage'
         return 'counts:read' if read else 'counts:submit'
     if path.startswith('/reports') or path.startswith('/aging'):
+        if path == '/aging/report':
+            return 'inventory:read'
+        if path == '/reports/scheduler/tick':
+            return 'alerts:manage'
+        if path.startswith('/reports') and path.endswith('/execute'):
+            return 'reports:read'
         return 'reports:read' if read else 'reports:write'
     if path.startswith('/accounting'):
         return 'accounting:read' if read else 'accounting:write'

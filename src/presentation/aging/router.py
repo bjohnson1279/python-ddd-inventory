@@ -9,7 +9,15 @@ from src.infrastructure.cost_models import CostLayerModel
 from src.domain.aging.services import InventoryAgingService, DeadStockRecommendationEngine
 from src.domain.product.layer_costing import utc, half_up
 
-router = APIRouter(prefix='/api/aging', tags=['aging'])
+router = APIRouter(prefix='/aging', tags=['aging'])
+
+
+@router.get('/report')
+async def aging_report(request: Request, session: AsyncSession = Depends(get_db_session)):
+    from src.application.retail_reports import snapshot
+    from src.infrastructure.financial_posting import database_now
+    now = await session.run_sync(lambda sync: database_now(sync.connection()))
+    return await snapshot(session, current_tenant(request), {'type': 'INVENTORY_AGING', 'filters': {}}, now, request.state.user_id)
 
 
 @router.get('/{sku}')

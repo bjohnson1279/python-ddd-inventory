@@ -15,12 +15,20 @@ async def install_tenant_policies(conn):
               'python_serial_tracking', 'python_serials', 'python_kits', 'python_kit_builds',
               'python_ledger_state', 'python_journals', 'python_journal_lines', 'python_financial_sources',
               'python_financial_documents', 'python_document_sources', 'python_financial_settlements', 'python_financial_credits',
-              'python_integration_connections', 'python_integration_orders', 'python_integration_receipts', 'python_integration_deliveries']
+              'python_integration_connections', 'python_integration_orders', 'python_integration_receipts', 'python_integration_deliveries',
+              'python_report_jobs', 'python_report_schedules', 'python_alert_config', 'python_alert_conditions', 'python_alert_notices']
     quote = conn.dialect.identifier_preparer.quote
     predicate = "tenant_id = current_setting('app.current_tenant_id', true)"
     for table in tables:
         name = quote(table)
         row_predicate = predicate
+        if table in ('python_report_jobs', 'python_report_schedules'):
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_report_definitions parent WHERE parent.id={name}.report_id AND parent.tenant_id={name}.tenant_id)"
+            actor = 'requested_by' if table == 'python_report_jobs' else 'created_by'
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_users parent WHERE parent.id={name}.{actor} AND parent.tenant_id={name}.tenant_id)"
+        if table == 'python_alert_notices':
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_alert_conditions parent WHERE parent.id={name}.condition_id AND parent.tenant_id={name}.tenant_id)"
+            row_predicate += f" AND EXISTS (SELECT 1 FROM python_notifications parent WHERE parent.id={name}.notification_id AND parent.tenant_id={name}.tenant_id)"
         if table in ('python_integration_orders', 'python_integration_receipts', 'python_integration_deliveries'):
             row_predicate += f" AND EXISTS (SELECT 1 FROM python_integration_connections parent WHERE parent.id = {name}.connection_id AND parent.tenant_id = {name}.tenant_id)"
         if table == 'python_integration_deliveries':

@@ -164,7 +164,16 @@ report/GraphQL isolation, registration defaults and throttling. Older tests now
 use real login rather than mocked administrator roles or permissive status sets.
 The PostgreSQL scenarios are part of the dedicated backend CI job.
 
+Reporting now has durable tenant-owned jobs, schedules, alert configuration,
+conditions and notice links, with forced PostgreSQL policies and owned-parent
+checks on all five new tables. Completed snapshots are immutable under both
+SQLite and PostgreSQL. Creator permissions are rechecked during generation and
+current download permissions are enforced on private artifacts. Notifications
+are recipient-scoped; manager escalation is bounded and atomic with its outbox
+event. Warehouse aging views expose quantity and age without costs. See
+[reporting and alerts](REPORTING_ALERTS.md) for operation and verification.
+
 Custom role editing, MFA/SSO, account-recovery delivery,
-durable report/sharing jobs and active WebSocket
+public report sharing and active WebSocket
 authorization remain additional work. No store database was migrated or service
 deployed during this change.

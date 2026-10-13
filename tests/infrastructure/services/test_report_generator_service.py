@@ -1,36 +1,18 @@
 import pytest
-import os
-import json
-import csv
 from src.infrastructure.services.report_generator_service import ReportGeneratorService
-
-@pytest.fixture
-def service():
-    return ReportGeneratorService()
+from src.application.retail_reports import export_csv
 
 @pytest.mark.asyncio
-async def test_generate_report_csv(service):
-    url = await service.generate_report("def-123", "exec-abc", "csv")
-    
-    assert url == "/uploads/reports/report_exec-abc.csv"
-    assert os.path.exists("./uploads/reports/report_exec-abc.csv")
-    
-    with open("./uploads/reports/report_exec-abc.csv", "r") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-        
-    assert len(rows) == 2
-    assert rows[0]["sku"] == "MOCK-1"
-    
+async def test_generation_requires_persisted_owned_job():
+    with pytest.raises(ValueError, match='session and tenant'):
+        await ReportGeneratorService().generate_report('definition', 'execution', 'json')
+
 @pytest.mark.asyncio
-async def test_generate_report_json(service):
-    url = await service.generate_report("def-123", "exec-def", "json")
-    
-    assert url == "/uploads/reports/report_exec-def.json"
-    assert os.path.exists("./uploads/reports/report_exec-def.json")
-    
-    with open("./uploads/reports/report_exec-def.json", "r") as f:
-        data = json.load(f)
-        
-    assert len(data) == 2
-    assert data[1]["sku"] == "MOCK-2"
+@pytest.mark.parametrize('format', ['pdf', 'xlsx', '../csv'])
+async def test_no_format_fallback_or_path_based_report_storage(format):
+    with pytest.raises(ValueError, match='CSV and JSON'):
+        await ReportGeneratorService(object(), 'tenant').generate_report('definition', 'execution', format)
+
+def test_csv_neutralizes_formula_text_and_preserves_integer_cents():
+    csv = export_csv({'columns': ['sku', 'cents'], 'rows': [{'sku': '=HYPERLINK("bad")', 'cents': -101}]})
+    assert "'=HYPERLINK" in csv and '-101' in csv
