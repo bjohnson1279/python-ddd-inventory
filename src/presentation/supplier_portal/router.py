@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Optional
@@ -82,8 +83,11 @@ async def submit_asn(dto: ASNSubmitDTO, request: Request, repo: SupplierCollabor
         
         try:
             valid_asn = service.validate_and_submit_asn(po, asn)
-            await repo.save_asn(valid_asn)
-            await repo.save_po(po) # Saves SHIPPED status
+            # Execute save_asn and save_po concurrently to reduce latency
+            await asyncio.gather(
+                repo.save_asn(valid_asn),
+                repo.save_po(po)  # Saves SHIPPED status
+            )
             return {"success": True, "asn_id": valid_asn.id}
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
