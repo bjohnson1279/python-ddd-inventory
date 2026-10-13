@@ -13,12 +13,18 @@ def test_get_woocommerce_security_uses_env_var():
         sec = get_woocommerce_security()
         assert sec.api_secret == b"test_secret_123"
 
+def test_get_woocommerce_security_missing_env_var():
+    with patch.dict(os.environ, {}, clear=True):
+        with pytest.raises(ValueError, match="WOOCOMMERCE_API_SECRET environment variable is not set"):
+            get_woocommerce_security()
+
 def test_woocommerce_webhook_missing_hmac():
-    response = client.post(
-        "/webhooks/woocommerce/orders/create",
-        headers={"X-WC-Webhook-Topic": "order.created"},
-        json={}
-    )
+    with patch.dict(os.environ, {"WOOCOMMERCE_API_SECRET": "test_secret_123"}):
+        response = client.post(
+            "/webhooks/woocommerce/orders/create",
+            headers={"X-WC-Webhook-Topic": "order.created"},
+            json={}
+        )
     assert response.status_code == 401
     assert response.json() == {"detail": "Missing Signature header"}
 
