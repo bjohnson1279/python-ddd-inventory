@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from src.infrastructure.auth.rbac import requires_roles
 from typing import List
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,24 @@ class OfflineBufferPayload(BaseModel):
     synced_at: str
     scans: List[OfflineScanEvent]
 
-def process_bulk_scans_background(payload: OfflineBufferPayload):
-    """Background task to process thousands of RFID/Barcode events."""
+async def process_scan(scan: OfflineScanEvent):
+    """Process an individual scan event asynchronously."""
+    # In a real system, this would translate the RFID to an SKU/Serial
+    # and execute the corresponding domain commands (e.g. adjust inventory)
+    pass
+
+async def process_bulk_scans_background(payload: OfflineBufferPayload, batch_size: int = 100):
+    """
+    Background task to process thousands of RFID/Barcode events.
+
+    Bolt Optimization: Process bulk scans concurrently using asyncio.gather in chunks.
+    This prevents blocking threadpool/event loop when executing async domain I/O operations for thousands of scans.
+    """
     logger.info(f"Processing {len(payload.scans)} offline scans from device {payload.device_id}...")
-    for scan in payload.scans:
-        # In a real system, this would translate the RFID to an SKU/Serial 
-        # and execute the corresponding domain commands (e.g. adjust inventory)
-        pass
+    scans = payload.scans
+    for i in range(0, len(scans), batch_size):
+        chunk = scans[i:i + batch_size]
+        await asyncio.gather(*(process_scan(scan) for scan in chunk))
     logger.info(f"Successfully processed {len(payload.scans)} scans.")
 
 @router.post("/bulk")
