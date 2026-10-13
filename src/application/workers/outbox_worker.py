@@ -40,6 +40,7 @@ class OutboxWorker:
                 return
 
             event_ids = []
+            cache_keys = set()
             for event in events:
                 # IMPORTANT: Keep network I/O sequential to preserve event ordering.
                 await self.publisher.publish(
@@ -48,13 +49,17 @@ class OutboxWorker:
                     message=event.payload
                 )
                 
-                # Invalidate tier-2 cache sequentially as well
-                await DistributedCache.invalidate(f"{event.aggregate_type}:{event.aggregate_id}")
-                
+                # Performance Optimization: Collect unique cache keys to invalidate concurrently after publishing.
+                cache_keys.add(f"{event.aggregate_type}:{event.aggregate_id}")
                 event_ids.append(event.id)
             
+            # Performance Optimization: Batch invalidate tier-2 cache concurrently using asyncio.gather.
+            # Deduplication via set eliminates redundant Redis requests for the same aggregate in a batch,
+            # and asyncio.gather parallelizes remaining network round trips.
+            if cache_keys:
+                await asyncio.gather(*(DistributedCache.invalidate(key) for key in cache_keys))
+
             # Perform bulk delete to eliminate N+1 query issue
             delete_stmt = delete(OutboxEventModel).where(OutboxEventModel.id.in_(event_ids))
             await session.execute(delete_stmt)
             await session.commit()
-
