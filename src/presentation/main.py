@@ -59,6 +59,9 @@ app.include_router(notification_router)
 from src.presentation.aging.router import router as aging_router
 app.include_router(aging_router)
 
+from src.presentation.offline_sync import router as offline_sync_router
+app.include_router(offline_sync_router)
+
 publisher = KafkaPublisher()
 worker = OutboxWorker(publisher)
 
