@@ -1,5 +1,12 @@
 import pytest
 
+def test_workforce_put_is_allowed_by_browser_preflight(client):
+    response = client.options('/api/workforce/profiles/operator', headers={
+        'Origin': 'http://localhost:5173', 'Access-Control-Request-Method': 'PUT',
+        'Access-Control-Request-Headers': 'Authorization,Content-Type'})
+    assert response.status_code == 200
+    assert 'PUT' in response.headers['access-control-allow-methods']
+
 
 @pytest.mark.asyncio
 async def test_analyze_owned_sku_aging(client):

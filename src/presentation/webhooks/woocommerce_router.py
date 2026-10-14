@@ -12,7 +12,9 @@ router = APIRouter(prefix="/webhooks/woocommerce", tags=["webhooks", "woocommerc
 
 # Dependencies
 def get_woocommerce_security():
-    api_secret = os.getenv("WOOCOMMERCE_API_SECRET", "")
+    api_secret = os.getenv("WOOCOMMERCE_API_SECRET")
+    if not api_secret:
+        raise ValueError("WOOCOMMERCE_API_SECRET environment variable is not set")
     return WooCommerceWebhookSecurity(api_secret=api_secret)
 
 def get_channel_ingestion_service():

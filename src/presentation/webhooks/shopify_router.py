@@ -12,7 +12,9 @@ router = APIRouter(prefix="/webhooks/shopify", tags=["webhooks", "shopify"])
 
 # In a real app, these would be injected via dependencies
 def get_webhook_security():
-    api_secret = os.getenv("SHOPIFY_API_SECRET", "")
+    api_secret = os.getenv("SHOPIFY_API_SECRET")
+    if not api_secret:
+        raise ValueError("SHOPIFY_API_SECRET environment variable is not set")
     return ShopifyWebhookSecurity(api_secret=api_secret)
 
 def get_channel_ingestion_service():

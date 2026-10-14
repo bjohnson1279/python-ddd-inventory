@@ -45,7 +45,7 @@ from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(CORSMiddleware,
     allow_origins=[origin.strip() for origin in os.getenv(
         'CORS_ORIGINS', 'http://localhost:3000,http://localhost:5173').split(',') if origin.strip()],
-    allow_methods=['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allow_headers=['Authorization', 'Content-Type', 'X-Tenant-ID'])
 
 from src.presentation.auth_router import router as auth_router
@@ -168,6 +168,9 @@ app.include_router(notification_router, prefix='/api')
 from src.presentation.aging.router import router as aging_router
 app.include_router(aging_router)
 app.include_router(aging_router, prefix='/api')
+from src.presentation.offline_sync import router as offline_sync_router
+app.include_router(offline_sync_router)
+app.include_router(offline_sync_router, prefix='/api')
 
 @app.get('/health')
 async def health_check():
