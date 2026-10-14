@@ -54,3 +54,84 @@ jobs:
 
       - name: Run Pytest Suite
         run: pytest
+
+  costing-postgres:
+    name: PostgreSQL costing and tenant security contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: costing-test-only
+          POSTGRES_DB: costing_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d costing_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Verify migration, costing, tenant isolation and concurrent writes
+        env:
+          COSTING_TEST_DATABASE_URL: postgresql+asyncpg://postgres:costing-test-only@127.0.0.1:5432/costing_test
+        run: pytest tests/infrastructure/test_costing_postgres.py tests/infrastructure/test_security_postgres.py tests/infrastructure/test_procurement_postgres.py tests/infrastructure/test_return_concurrency.py tests/infrastructure/test_transfer_uom_concurrency.py tests/infrastructure/test_outbox_contract.py tests/infrastructure/test_outbox_migration.py tests/infrastructure/test_serial_kit_concurrency.py tests/infrastructure/test_financial_concurrency.py tests/infrastructure/test_integration_concurrency.py tests/infrastructure/test_reporting_concurrency.py tests/infrastructure/test_workforce_concurrency.py -q --tb=short
+
+  kafka-delivery:
+    name: Acknowledged Kafka outbox delivery
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Start disposable Kafka broker
+        run: >-
+          docker run -d --name event-delivery-kafka -p 127.0.0.1:19092:9092
+          -e KAFKA_NODE_ID=1 -e KAFKA_PROCESS_ROLES=broker,controller
+          -e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+          -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:19092
+          -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+          -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+          -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093
+          -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+          -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+          -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 apache/kafka:4.1.0
+      - name: Wait for Kafka metadata service
+        run: |
+          python - <<'PY'
+          import asyncio
+          from aiokafka.admin import AIOKafkaAdminClient
+          async def ready():
+              for attempt in range(30):
+                  admin = AIOKafkaAdminClient(bootstrap_servers='127.0.0.1:19092')
+                  try:
+                      await asyncio.wait_for(admin.start(), 3)
+                      return
+                  except Exception:
+                      await asyncio.sleep(2)
+                  finally:
+                      await admin.close()
+              raise SystemExit('Kafka metadata service did not become ready')
+          asyncio.run(ready())
+          PY
+      - name: Verify publication and actual consumer records
+        env:
+          OUTBOX_KAFKA_TEST_BOOTSTRAP_SERVERS: 127.0.0.1:19092
+        run: pytest tests/infrastructure/messaging/test_kafka_delivery_integration.py -q --tb=short
+      - name: Stop disposable broker
+        if: always()
+        run: docker rm -f event-delivery-kafka

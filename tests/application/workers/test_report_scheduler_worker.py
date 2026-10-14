@@ -25,7 +25,7 @@ async def test_start_and_loop(worker):
             await worker.stop()
 
     with patch("asyncio.sleep", side_effect=mock_sleep):
-        with patch.object(worker, "tick", wraps=worker.tick) as mock_tick:
+        with patch.object(worker, "tick", new_callable=AsyncMock) as mock_tick:
             await worker.start()
             assert mock_tick.call_count == 2
             assert worker.is_running is False
@@ -68,3 +68,5 @@ async def test_tick_batches_database_operations(worker):
 
     assert "UPDATE report_schedules" in second_call_args[0][0]
     assert len(second_call_args[0][1]) == 3
+async def test_tick_requires_tenant_and_persistent_session(worker):
+    with pytest.raises(ValueError, match='session and tenant'):
