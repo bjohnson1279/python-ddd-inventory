@@ -160,6 +160,9 @@
 **Learning:** Frequent reads of a dynamic calculation (like summing values in CRDT dictionaries) can create a performance bottleneck if the data structures grow large.
 **Action:** Maintain an internal O(1) running total (`_cached_value`) that increments/decrements alongside state changes, avoiding O(N) traversals on every read. Recalculate the cached value only on bulk operations like `merge`.
 
+## 2024-10-13 - Batch executemany processing for ReportSchedulerWorker tick
+**Learning:** Executing single-record database INSERT and UPDATE queries inside a schedule loop creates an N+1 query pattern that scales poorly as scheduled reports increase.
+**Action:** Collect outbox event payloads and schedule nextRunAt values into parameter lists inside the loop, then execute batch `executemany` database operations outside the loop to reduce DB round-trips to O(1).
 ## 2026-10-13 - Concurrent save_asn and save_po execution in submit_asn
 **Learning:** In `submit_asn`, sequentially awaiting `repo.save_asn` and `repo.save_po` doubled I/O wait latency because both repository operations were independent.
 **Action:** Use `asyncio.gather(repo.save_asn(valid_asn), repo.save_po(po))` to execute independent repository I/O saves concurrently, reducing endpoint latency by ~42%.
