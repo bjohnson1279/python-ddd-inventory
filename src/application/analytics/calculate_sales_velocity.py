@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 class CalculateSalesVelocity:
     """Calculates sales velocity (ADS) and run-out dates based on dispatch history."""

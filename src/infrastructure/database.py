@@ -8,8 +8,6 @@ import os
 DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is not set")
-if DATABASE_URL.startswith('postgresql://'):
-    DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://', 1)
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -26,11 +24,15 @@ async def get_db_session(request: Request, x_tenant_id: str = Header(default=Non
             detail="Tenant ID mismatch: You are not authorized to access this tenant's data."
         )
 
-    if x_tenant_id and not user_tenant:
-        raise HTTPException(status_code=401, detail='Invalid or missing token')
-    # Explicit row scopes are enforced by repositories. Do not redirect models
-    # into unprovisioned schemas or leak a session setting through pooled connections.
-    async with async_session() as session:
-        if user_tenant and session.bind.dialect.name == 'postgresql':
-            await session.execute(text("SELECT set_config('app.current_tenant_id', :tenant, true)"), {'tenant': user_tenant})
+    active_tenant = x_tenant_id or user_tenant
+
+    # Implement Dynamic Multi-Database Tenant Provisioning (SaaS) via schema partitioning
+    options = {}
+    if active_tenant:
+        options["schema_translate_map"] = {None: f"tenant_{active_tenant}"}
+
+    async with async_session(**({"execution_options": options} if options else {})) as session:
+        if active_tenant:
+            # Enforce Row-Level Security via Postgres session configuration for shared tables
+            await session.execute(text("SELECT set_config('rls.tenant_id', :tenant, false)"), {"tenant": active_tenant})
         yield session

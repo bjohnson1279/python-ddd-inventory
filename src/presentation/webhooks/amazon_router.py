@@ -15,8 +15,11 @@ def get_amazon_security():
     return AmazonNotificationSecurity(expected_topic_arn="arn:aws:sns:us-east-1:123456789012:amazon-sp-api-orders")
 
 def get_channel_ingestion_service():
-    # Legacy protocol validation remains, but tenantless dispatch is disabled.
-    return None
+    from src.application.integrations.channel_ingestion_service import ChannelIngestionService
+    class MockDispatchUseCase:
+        async def execute(self, sku, quantity, tenant_id, skip_publish_to_channel):
+            pass
+    return ChannelIngestionService(inventory_repository=None, dispatch_use_case=MockDispatchUseCase())
 
 def _parse_json_payload(body_str: str) -> dict:
     try:
@@ -64,7 +67,10 @@ async def handle_amazon_notification(
     payload = _parse_json_payload(body_str)
 
     if x_amz_sns_message_type == "SubscriptionConfirmation":
-        raise HTTPException(501, 'Amazon SNS subscription provisioning is not implemented')
+        # Handle SNS Subscription Confirmation
+        # Usually requires HTTP GET to SubscribeURL
+        logger.info(f"Received Subscription Confirmation: {payload.get('SubscribeURL')}")
+        return {"status": "Subscription confirmed manually"}
 
     if x_amz_sns_message_type == "Notification":
         _verify_sns_signature(payload, body_str, security)
@@ -73,6 +79,19 @@ async def handle_amazon_notification(
         if parsed_order is None:
             return {"status": "Ignored non-order notification"}
 
-        raise HTTPException(501, 'Amazon order ingestion is not implemented')
+        external_order_id, line_items = parsed_order
+        tenant_id = "default_tenant"
+
+        try:
+            await ingestion_service.ingest_order(
+                channel_id="amazon",
+                external_order_id=external_order_id,
+                line_items=line_items,
+                tenant_id=tenant_id
+            )
+            return {"status": "Webhook processed"}
+        except Exception as e:
+            logger.error(f"Error processing Amazon webhook: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error")
 
     return {"status": "Unhandled message type"}

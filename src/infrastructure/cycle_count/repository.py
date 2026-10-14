@@ -6,15 +6,10 @@ from src.domain.cycle_count.repository import CycleCountRepository
 from src.infrastructure.cycle_count.models import CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel
 
 class SQLAlchemyCycleCountRepository(CycleCountRepository):
-    def __init__(self, session: AsyncSession, tenant_id: str):
-        if not tenant_id:
-            raise ValueError('Authenticated tenant is required')
+    def __init__(self, session: AsyncSession):
         self.session = session
-        self.tenant_id = tenant_id
 
     async def save_plan(self, plan: CycleCountPlan) -> CycleCountPlan:
-        if plan.tenant_id != self.tenant_id:
-            raise ValueError('Tenant ID mismatch')
         model = CycleCountPlanModel(
             id=plan.id,
             tenant_id=plan.tenant_id,
@@ -30,8 +25,6 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
         return plan
 
     async def get_active_plans(self, tenant_id: str) -> List[CycleCountPlan]:
-        if tenant_id != self.tenant_id:
-            raise ValueError('Tenant ID mismatch')
         stmt = select(CycleCountPlanModel).where(
             CycleCountPlanModel.tenant_id == tenant_id,
             CycleCountPlanModel.is_active == True
@@ -52,11 +45,6 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
         ]
 
     async def save_record(self, record: CycleCountRecord) -> CycleCountRecord:
-        if record.tenant_id != self.tenant_id:
-            raise ValueError('Tenant ID mismatch')
-        existing = await self.session.get(CycleCountRecordModel, record.id)
-        if existing and existing.tenant_id != self.tenant_id:
-            raise ValueError('Count belongs to another tenant')
         model = CycleCountRecordModel(
             id=record.id,
             tenant_id=record.tenant_id,
@@ -66,16 +54,13 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
             abc_classification=record.abc_classification,
             zone=record.zone,
             is_blind_count=record.is_blind_count,
-            assigned_operator_id=record.assigned_operator_id,
             created_at=record.created_at
         )
-        await self.session.merge(model)
+        self.session.add(model)
         await self.session.commit()
         return record
 
     async def save_records(self, records: List[CycleCountRecord]) -> List[CycleCountRecord]:
-        if any(record.tenant_id != self.tenant_id for record in records):
-            raise ValueError('Tenant ID mismatch')
         models = [
             CycleCountRecordModel(
                 id=record.id,
@@ -94,8 +79,7 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
         return records
 
     async def get_record(self, record_id: str) -> CycleCountRecord:
-        stmt = select(CycleCountRecordModel).where(CycleCountRecordModel.id == record_id,
-                                                  CycleCountRecordModel.tenant_id == self.tenant_id)
+        stmt = select(CycleCountRecordModel).where(CycleCountRecordModel.id == record_id)
         result = await self.session.execute(stmt)
         m = result.scalars().first()
         if not m:
@@ -109,7 +93,6 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
 
     async def get_assigned_records(self, operator_id: str) -> List[CycleCountRecord]:
         stmt = select(CycleCountRecordModel).where(
-            CycleCountRecordModel.tenant_id == self.tenant_id,
             CycleCountRecordModel.assigned_operator_id == operator_id,
             CycleCountRecordModel.status.in_(['PENDING', 'RECOUNT_REQUIRED'])
         )
@@ -128,12 +111,6 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
     from src.infrastructure.cycle_count.models import CycleCountLineItemModel
 
     async def save_line_items(self, items: List['CycleCountLineItem']) -> None:
-        for item in items:
-            if not await self.get_record(item.record_id):
-                raise ValueError('Count not found')
-            existing = await self.session.get(CycleCountLineItemModel, item.id)
-            if existing and existing.record_id != item.record_id:
-                raise ValueError('Count line belongs to another record')
         models = [
             CycleCountLineItemModel(
                 id=item.id, record_id=item.record_id, sku=item.sku,
@@ -142,14 +119,11 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
                 status=item.status
             ) for item in items
         ]
-        for model in models:
-            await self.session.merge(model)
-        await self.session.flush()
+        self.session.add_all(models)
+        await self.session.commit()
 
     async def get_record_line_items(self, record_id: str) -> List['CycleCountLineItem']:
-        stmt = select(CycleCountLineItemModel).join(CycleCountRecordModel,
-            CycleCountLineItemModel.record_id == CycleCountRecordModel.id).where(
-            CycleCountLineItemModel.record_id == record_id, CycleCountRecordModel.tenant_id == self.tenant_id)
+        stmt = select(CycleCountLineItemModel).where(CycleCountLineItemModel.record_id == record_id)
         result = await self.session.execute(stmt)
         models = result.scalars().all()
         return [
@@ -164,9 +138,7 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
     async def get_line_items_by_record_ids(self, record_ids: List[str]) -> Dict[str, List['CycleCountLineItem']]:
         if not record_ids:
             return {}
-        stmt = select(CycleCountLineItemModel).join(CycleCountRecordModel,
-            CycleCountLineItemModel.record_id == CycleCountRecordModel.id).where(
-            CycleCountLineItemModel.record_id.in_(record_ids), CycleCountRecordModel.tenant_id == self.tenant_id)
+        stmt = select(CycleCountLineItemModel).where(CycleCountLineItemModel.record_id.in_(record_ids))
         result = await self.session.execute(stmt)
         models = result.scalars().all()
         items_by_record: Dict[str, List[CycleCountLineItem]] = {rid: [] for rid in record_ids}

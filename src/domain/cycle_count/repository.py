@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List
-from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord
+from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord, CycleCountLineItem
 
 class CycleCountRepository(ABC):
     @abstractmethod

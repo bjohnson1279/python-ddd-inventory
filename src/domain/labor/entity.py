@@ -19,8 +19,8 @@ class OperatorProfile:
 class OperatorPerformanceKpi:
     operator_id: str
     target_date: date
-    actual_picks_per_hour: Optional[float]
-    cycle_count_accuracy_percent: Optional[float]
+    actual_picks_per_hour: float
+    cycle_count_accuracy_percent: float
     traversal_distance_meters: float
 
 @dataclass

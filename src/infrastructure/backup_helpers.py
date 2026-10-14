@@ -2,24 +2,8 @@ import os
 import subprocess
 import datetime
 import logging
-import urllib.parse
 
 logger = logging.getLogger(__name__)
-
-
-def _validate_database_url(url: str) -> str:
-    if not isinstance(url, str) or not url.strip():
-        raise ValueError("Database URL must be a non-empty string.")
-    if url.startswith("-"):
-        raise ValueError("Database URL cannot start with a hyphen or option flag.")
-    if any(c in url for c in "\n\r\x00"):
-        raise ValueError("Database URL contains illegal control characters.")
-
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme not in ("postgresql", "postgres"):
-        raise ValueError("Invalid database URL scheme. Only 'postgresql' or 'postgres' are supported.")
-    return url
-
 
 class DatabaseBackupHelper:
     """Helper to perform automated PostgreSQL backups and restores."""
@@ -28,14 +12,6 @@ class DatabaseBackupHelper:
         self.database_url = database_url
         self.backup_dir = backup_dir
         os.makedirs(self.backup_dir, exist_ok=True)
-
-    @property
-    def database_url(self) -> str:
-        return self._database_url
-
-    @database_url.setter
-    def database_url(self, value: str):
-        self._database_url = _validate_database_url(value)
 
     def backup(self, compress: bool = True) -> str:
         """Create a full database snapshot."""

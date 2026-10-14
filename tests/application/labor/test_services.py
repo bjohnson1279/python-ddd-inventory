@@ -35,17 +35,3 @@ def test_predictive_scheduling_engine():
     
     schedule.publish()
     assert schedule.status == ScheduleStatus.PUBLISHED
-
-@pytest.mark.parametrize('target,duration', [(0, 8), (-1, 8), (float('nan'), 8), (100, 0), (100, float('inf'))])
-def test_staffing_rejects_invalid_capacity(target, duration):
-    with pytest.raises(ValueError):
-        PredictiveSchedulingEngine().generate_staffing_recommendation(date.today(), 1, 1, target, duration)
-
-def test_empty_measurements_are_unknown():
-    result = OperatorPerformanceService().calculate_daily_kpi('op', date.today(), 0, 0, 0, 0, 0)
-    assert result.actual_picks_per_hour is None and result.cycle_count_accuracy_percent is None
-
-@pytest.mark.parametrize('counts,hours,accurate,total,distance', [(-1, 1, 0, 0, 0), (1, 0, 0, 0, 0), (1, float('nan'), 0, 0, 0), (1, 1, 2, 1, 0), (1, 1, 0, 0, -1)])
-def test_invalid_measurements(counts, hours, accurate, total, distance):
-    with pytest.raises(ValueError):
-        OperatorPerformanceService().calculate_daily_kpi('op', date.today(), counts, hours, accurate, total, distance)

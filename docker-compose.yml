@@ -7,7 +7,6 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/inventory
-      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET before starting the API}
     depends_on:
       db:
         condition: service_healthy

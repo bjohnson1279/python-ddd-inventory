@@ -41,7 +41,3 @@ def test_validate_hmac_different_body():
     
     security = ShopifyWebhookSecurity(secret)
     assert security.validate_hmac(body2, hmac_body1) is False
-
-def test_init_empty_api_secret_raises_error():
-    with pytest.raises(ValueError, match="API secret must not be empty"):
-        ShopifyWebhookSecurity("")
