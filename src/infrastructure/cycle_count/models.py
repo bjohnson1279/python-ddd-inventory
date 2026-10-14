@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Boolean, DateTime
+from sqlalchemy import Column, String, Integer, BigInteger, Boolean, DateTime, JSON, UniqueConstraint
 from src.infrastructure.database import Base
 from datetime import datetime
 import uuid
@@ -26,6 +26,10 @@ class CycleCountRecordModel(Base):
     abc_classification = Column(String, nullable=False)
     zone = Column(String, nullable=True)
     assigned_operator_id = Column(String, nullable=True)
+    location_id = Column(String, nullable=True)
+    revision = Column(Integer, nullable=False, default=0, server_default='0')
+    approved_by = Column(String, nullable=True)
+    approval_result = Column(JSON, nullable=True)
     is_blind_count = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -36,7 +40,18 @@ class CycleCountLineItemModel(Base):
     record_id = Column(String, nullable=False)
     sku = Column(String, nullable=False)
     expected_quantity = Column(Integer, nullable=False)
+    stock_version = Column(Integer, nullable=True)
     counted_quantity = Column(Integer, nullable=True)
     variance_quantity = Column(Integer, nullable=True)
-    variance_value = Column(Integer, nullable=True) # or Float
+    variance_value = Column(BigInteger, nullable=True)
     status = Column(String, nullable=False, default='PENDING')
+
+
+class CountRequestModel(Base):
+    __tablename__ = 'python_count_requests'
+    __table_args__ = (UniqueConstraint('tenant_id', 'mutation_id'),)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, nullable=False)
+    mutation_id = Column(String, nullable=False)
+    request = Column(JSON, nullable=False)
+    result = Column(JSON, nullable=False)

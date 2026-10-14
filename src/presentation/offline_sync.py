@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Request, HTTPException
 from pydantic import BaseModel
 from src.infrastructure.auth.rbac import requires_roles
 from typing import List
@@ -42,11 +42,11 @@ async def process_bulk_scans_background(payload: OfflineBufferPayload, batch_siz
     logger.info(f"Successfully processed {len(payload.scans)} scans.")
 
 @router.post("/bulk")
-@requires_roles(['ADMIN', 'MANAGER', 'USER'])
+@requires_roles(['ADMIN', 'MANAGER', 'WAREHOUSE_OPERATOR'])
 async def sync_offline_buffer(payload: OfflineBufferPayload, request: Request, background_tasks: BackgroundTasks):
     """
     Endpoint for PWA / IoT devices to upload bulk scans collected during network dead zones.
     """
-    # Accept the payload immediately to unblock the client
-    background_tasks.add_task(process_bulk_scans_background, payload)
-    return {"status": "accepted", "message": f"Queued {len(payload.scans)} scans for processing."}
+    # The legacy helper neither persists nor applies scans. Do not acknowledge
+    # inventory work that has not actually been queued.
+    raise HTTPException(501, 'Offline RFID ingestion is unavailable; use the durable cycle-count replay API')

@@ -13,3 +13,5 @@ opentelemetry-sdk>=1.20.0
 opentelemetry-instrumentation-fastapi>=0.41b0
 strawberry-graphql>=0.217.0
 psutil
+PyJWT>=2.10.0,<3
+aiokafka>=0.12,<0.15

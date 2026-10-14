@@ -16,9 +16,18 @@ class CostingStrategy(ABC):
         """Calculate COGS based on the strategy pattern."""
         pass
 
+
+def validate_inputs(quantity_sold, batches):
+    if type(quantity_sold) is not int or quantity_sold < 0:
+        raise ValueError('Sale quantity must be a nonnegative integer')
+    for batch in batches:
+        if type(batch.quantity) is not int or batch.quantity < 0 or not batch.unit_cost.is_finite() or batch.unit_cost < 0:
+            raise ValueError('Batch quantity and cost must be nonnegative and finite')
+
 class FIFOCosting(CostingStrategy):
     """First-In, First-Out costing strategy."""
     def calculate_cost_of_goods_sold(self, quantity_sold: int, batches: List[InventoryBatch]) -> Decimal:
+        validate_inputs(quantity_sold, batches)
         # Sort batches by oldest first
         sorted_batches = sorted(batches, key=lambda b: b.received_at)
         cost = Decimal('0.00')
@@ -39,6 +48,7 @@ class FIFOCosting(CostingStrategy):
 class LIFOCosting(CostingStrategy):
     """Last-In, First-Out costing strategy."""
     def calculate_cost_of_goods_sold(self, quantity_sold: int, batches: List[InventoryBatch]) -> Decimal:
+        validate_inputs(quantity_sold, batches)
         # Sort batches by newest first
         sorted_batches = sorted(batches, key=lambda b: b.received_at, reverse=True)
         cost = Decimal('0.00')
@@ -59,6 +69,7 @@ class LIFOCosting(CostingStrategy):
 class WACCosting(CostingStrategy):
     """Weighted Average Cost costing strategy."""
     def calculate_cost_of_goods_sold(self, quantity_sold: int, batches: List[InventoryBatch]) -> Decimal:
+        validate_inputs(quantity_sold, batches)
         # Bolt Optimization: Avoid multiple O(N) passes by calculating total quantity and value in a single pass.
         # Impact: Reduces iteration overhead and speeds up weighted average cost calculations for large batch lists.
         total_quantity = 0
