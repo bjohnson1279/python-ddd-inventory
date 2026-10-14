@@ -1,0 +1,174 @@
+"""Explicit migration of the Python catalog; never runs during API startup.
+
+Existing unscoped products require an operator-selected legacy tenant. Run on
+the Python database only, after backup, not a sibling backend's catalog table.
+"""
+import argparse
+import asyncio
+import re
+from sqlalchemy import inspect, text, select, func
+import uuid
+from datetime import datetime, timezone
+from src.infrastructure.database import engine
+from src.infrastructure.auth.identity import TenantModel, UserModel, LoginSessionModel, LoginRateModel, SecurityAuditModel
+from src.infrastructure.auth.rls import install_tenant_policies
+from src.infrastructure.owned_feature_models import ReportDefinitionModel, NotificationModel
+from src.infrastructure.cycle_count.models import CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel, CountRequestModel
+from src.infrastructure.product.models import ProductModel
+from src.infrastructure.stock_models import StockModel, StockMovementModel
+from src.infrastructure.messaging.models import OutboxEventModel, OutboxStreamModel, allocate_sequence
+from src.infrastructure.serial_kit_models import TrackingModel, SerialModel, KitModel, KitBuildModel
+from src.infrastructure.financial_models import LedgerStateModel, JournalModel, JournalLineModel, FinancialSourceModel, FinancialDocumentModel, DocumentSourceModel, SettlementModel, FinancialCreditModel
+from src.infrastructure.integration_models import IntegrationConnection, IntegrationOrder, IntegrationReceipt, IntegrationDelivery
+from src.infrastructure.report_alert_models import ReportJob, ReportSchedule, AlertConfig, AlertCondition, AlertNotice
+from src.infrastructure.workforce_models import OperatorProfile, LaborShift, TaskPerformance, StaffingPlan
+from src.infrastructure.catalog_models import CatalogModel, VariantLinkModel, BarcodeModel
+from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
+from src.infrastructure.procurement_models import SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel
+from src.infrastructure.return_models import ReturnModel, ReturnActionModel, QuarantineModel
+from src.infrastructure.transfer_models import TransferModel, InventoryActionModel, UomConfigModel
+
+
+async def create_related(conn):
+    for model in (StockModel, StockMovementModel, OutboxStreamModel, OutboxEventModel, CatalogModel, VariantLinkModel, BarcodeModel,
+                  AccountingConfigModel, CostLayerModel, ReportDefinitionModel, NotificationModel,
+                  CycleCountPlanModel, CycleCountRecordModel, CycleCountLineItemModel, CountRequestModel,
+                  SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel,
+                  ReturnModel, ReturnActionModel, QuarantineModel,
+                  TransferModel, InventoryActionModel, UomConfigModel,
+                  TrackingModel, SerialModel, KitModel, KitBuildModel,
+                  LedgerStateModel, JournalModel, JournalLineModel, FinancialSourceModel,
+                  FinancialDocumentModel, DocumentSourceModel, SettlementModel, FinancialCreditModel,
+                  IntegrationConnection, IntegrationOrder, IntegrationReceipt, IntegrationDelivery,
+                  ReportJob, ReportSchedule, AlertConfig, AlertCondition, AlertNotice,
+                  OperatorProfile, LaborShift, TaskPerformance, StaffingPlan):
+        await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
+    upgrades = {
+        'python_notifications': {'link': 'VARCHAR'},
+        'outbox_events': {'status': "VARCHAR NOT NULL DEFAULT 'PENDING'",
+            'attempts': 'INTEGER NOT NULL DEFAULT 0', 'cycle_attempts': 'INTEGER NOT NULL DEFAULT 0',
+            'version': 'INTEGER NOT NULL DEFAULT 0', 'next_attempt_at': 'TIMESTAMP',
+            'lease_token': 'VARCHAR', 'lease_expires_at': 'TIMESTAMP', 'last_attempt_at': 'TIMESTAMP',
+            'last_error': 'VARCHAR', 'published_at': 'TIMESTAMP', 'stream_key': 'VARCHAR', 'sequence': 'BIGINT'},
+        'python_cost_layers': {'initial_value_cents': 'BIGINT'},
+        'cycle_count_records': {'location_id': 'VARCHAR', 'revision': 'INTEGER NOT NULL DEFAULT 0',
+                               'approved_by': 'VARCHAR', 'approval_result': 'JSON'},
+        'cycle_count_line_items': {'stock_version': 'INTEGER'},
+    }
+    for table, additions in upgrades.items():
+        columns = {c['name'] for c in await conn.run_sync(lambda sync: inspect(sync).get_columns(table))}
+        for name, ddl in additions.items():
+            if name not in columns:
+                if table == 'outbox_events' and conn.dialect.name == 'postgresql' and ddl == 'TIMESTAMP':
+                    ddl = 'TIMESTAMP WITH TIME ZONE'
+                await conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}'))
+    if conn.dialect.name == 'postgresql':
+        await conn.execute(text('ALTER TABLE cycle_count_line_items ALTER COLUMN variance_value TYPE BIGINT'))
+        columns = await conn.run_sync(lambda sync: inspect(sync).get_columns('outbox_events'))
+        created_type = next(c['type'] for c in columns if c['name'] == 'created_at')
+        if not getattr(created_type, 'timezone', False):
+            await conn.execute(text("ALTER TABLE outbox_events ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE USING created_at AT TIME ZONE 'UTC'"))
+        valid_tenant = "json_typeof(payload -> 'tenantId') = 'string' AND EXISTS (SELECT 1 FROM python_tenants t WHERE t.id = payload ->> 'tenantId')"
+    else:
+        valid_tenant = "CASE WHEN json_valid(payload) THEN json_type(payload, '$.tenantId') = 'text' AND EXISTS (SELECT 1 FROM python_tenants t WHERE t.id = json_extract(payload, '$.tenantId')) ELSE 0 END"
+    # Preserve unassigned legacy records; never guess which store owns them.
+    await conn.execute(text(f"UPDATE outbox_events SET status='DEAD_LETTER', last_error='UnassignedLegacyEvent' WHERE status <> 'PUBLISHED' AND NOT coalesce(({valid_tenant}), false)"))
+    await conn.execute(text("UPDATE outbox_events SET status='DEAD_LETTER', last_error='InvalidLegacyTimestamp' WHERE status <> 'PUBLISHED' AND created_at IS NULL"))
+    legacy_events = (await conn.execute(select(OutboxEventModel.__table__).where(OutboxEventModel.sequence.is_(None), text(valid_tenant))
+        .order_by(OutboxEventModel.created_at.asc().nulls_first(), OutboxEventModel.id))).mappings().all()
+    tenants = set(await conn.scalars(select(TenantModel.id)))
+    for row in legacy_events:
+        payload = row['payload']
+        tenant = payload.get('tenantId') if isinstance(payload, dict) else None
+        if isinstance(tenant, str) and tenant in tenants and row['aggregate_type'] and row['aggregate_id']:
+            key, sequence = await conn.run_sync(lambda sync, t=tenant, r=row: allocate_sequence(sync, t, r['aggregate_type'], r['aggregate_id']))
+            await conn.execute(OutboxEventModel.__table__.update().where(OutboxEventModel.id == row['id'])
+                .values(stream_key=key, sequence=sequence))
+    for index in OutboxEventModel.__table__.indexes:
+        await conn.run_sync(lambda sync, item=index: item.create(sync, checkfirst=True))
+    # Preserve opening quantities without guessing costs; safe on repeat runs.
+    rows = await conn.execute(select(StockModel.__table__,
+        func.coalesce(func.sum(CostLayerModel.remaining_quantity), 0).label('layered'))
+        .outerjoin(CostLayerModel, StockModel.id == CostLayerModel.stock_id)
+        .group_by(*StockModel.__table__.columns))
+    for stock in rows.mappings():
+        missing = stock['quantity'] - stock['layered']
+        if missing < 0:
+            raise ValueError('Cost layers exceed stock; reconcile inventory before migration')
+        if missing:
+            await conn.execute(CostLayerModel.__table__.insert().values(id=str(uuid.uuid4()),
+                stock_id=stock['id'], tenant_id=stock['tenant_id'], sku=stock['sku'],
+                location_id=stock['location_id'], initial_quantity=missing, remaining_quantity=missing,
+                unit_cost_cents=None, remaining_value_cents=None, received_at=datetime.now(timezone.utc),
+                quarantined=False))
+    await install_tenant_policies(conn)
+
+
+async def migrate(legacy_tenant=None, identity_only=False):
+    if legacy_tenant and not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', legacy_tenant):
+        raise ValueError('Invalid legacy tenant ID')
+    async with engine.begin() as conn:
+        await conn.run_sync(lambda sync: TenantModel.__table__.create(sync, checkfirst=True))
+        await conn.run_sync(lambda sync: UserModel.__table__.create(sync, checkfirst=True))
+        columns = {column['name'] for column in await conn.run_sync(lambda sync: inspect(sync).get_columns('python_users'))}
+        if 'is_active' not in columns:
+            default = 'TRUE' if conn.dialect.name == 'postgresql' else '1'
+            await conn.execute(text(f'ALTER TABLE python_users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT {default}'))
+        if 'auth_version' not in columns:
+            await conn.execute(text('ALTER TABLE python_users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0'))
+        if 'supplier_id' not in columns:
+            await conn.execute(text('ALTER TABLE python_users ADD COLUMN supplier_id VARCHAR'))
+        for model in (LoginSessionModel, LoginRateModel, SecurityAuditModel):
+            await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
+    if identity_only:
+        return
+    async with engine.begin() as conn:
+        info = await conn.run_sync(lambda sync: {
+            'exists': inspect(sync).has_table('products'),
+        })
+        if not info['exists']:
+            await conn.run_sync(lambda sync: ProductModel.__table__.create(sync))
+            await create_related(conn)
+            return
+        columns = await conn.run_sync(lambda sync: inspect(sync).get_columns('products'))
+        if 'tenant_id' in {column['name'] for column in columns}:
+            await create_related(conn)
+            return
+        if conn.dialect.name != 'postgresql':
+            raise ValueError('Legacy catalog migration requires PostgreSQL; fresh SQLite schemas are supported')
+        if not legacy_tenant:
+            raise ValueError('Existing catalog requires --legacy-tenant; do not guess product ownership')
+        # Identity setup must be done before assigning legacy stock to it.
+        exists = await conn.scalar(text('SELECT id FROM python_tenants WHERE id = :tenant'), {'tenant': legacy_tenant})
+        if not exists:
+            raise ValueError('Set up the legacy tenant through /auth/setup before migrating its catalog')
+        constraints = await conn.run_sync(lambda sync: inspect(sync).get_unique_constraints('products'))
+        indexes = await conn.run_sync(lambda sync: inspect(sync).get_indexes('products'))
+        await conn.execute(text('ALTER TABLE products ADD COLUMN tenant_id VARCHAR'))
+        await conn.execute(text('UPDATE products SET tenant_id = :tenant'), {'tenant': legacy_tenant})
+        await conn.execute(text('ALTER TABLE products ALTER COLUMN tenant_id SET NOT NULL'))
+        quote = conn.dialect.identifier_preparer.quote
+        for constraint in constraints:
+            if constraint['column_names'] == ['sku']:
+                await conn.execute(text('ALTER TABLE products DROP CONSTRAINT ' + quote(constraint['name'])))
+        for index in indexes:
+            if index.get('unique') and index['column_names'] == ['sku'] and not index.get('duplicates_constraint'):
+                await conn.execute(text('DROP INDEX ' + quote(index['name'])))
+        await conn.execute(text('ALTER TABLE products ADD CONSTRAINT products_tenant_sku_key UNIQUE (tenant_id, sku)'))
+        await conn.execute(text('CREATE INDEX ix_products_tenant_id ON products (tenant_id)'))
+        await create_related(conn)
+
+
+async def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--legacy-tenant')
+    parser.add_argument('--identity-only', action='store_true')
+    args = parser.parse_args()
+    try:
+        await migrate(args.legacy_tenant, args.identity_only)
+    finally:
+        await engine.dispose()
+
+
+if __name__ == '__main__':
+    asyncio.run(main())

@@ -4,6 +4,8 @@ import base64
 
 class ShopifyWebhookSecurity:
     def __init__(self, api_secret: str):
+        if not api_secret:
+            raise ValueError("API secret must not be empty")
         self.api_secret = api_secret.encode('utf-8')
 
     def validate_hmac(self, body: str, expected_hmac: str) -> bool:

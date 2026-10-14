@@ -40,3 +40,7 @@ def test_validate_hmac_different_body():
 
     security = WooCommerceWebhookSecurity(secret)
     assert security.validate_hmac(body2, hmac_body1) is False
+
+def test_init_with_empty_secret_raises_value_error():
+    with pytest.raises(ValueError, match="WooCommerce API secret cannot be empty"):
+        WooCommerceWebhookSecurity("")
