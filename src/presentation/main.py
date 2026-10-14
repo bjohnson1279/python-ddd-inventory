@@ -167,9 +167,24 @@ app.include_router(notification_router, prefix='/api')
 
 from src.presentation.aging.router import router as aging_router
 app.include_router(aging_router)
-app.include_router(aging_router, prefix='/api')
+
 from src.presentation.offline_sync import router as offline_sync_router
 app.include_router(offline_sync_router)
+
+publisher = KafkaPublisher()
+worker = OutboxWorker(publisher)
+
+@app.on_event('startup')
+async def startup_event():
+    await publisher.start()
+    asyncio.create_task(worker.start())
+
+@app.on_event('shutdown')
+async def shutdown_event():
+    await worker.stop()
+    await publisher.stop()
+
+app.include_router(aging_router, prefix='/api')
 app.include_router(offline_sync_router, prefix='/api')
 
 @app.get('/health')
