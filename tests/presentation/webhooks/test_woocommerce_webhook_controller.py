@@ -47,7 +47,7 @@ def test_woocommerce_webhook_unsupported_topic():
     assert response.status_code == 400
     assert response.json() == {"detail": "Unsupported topic"}
 
-def test_woocommerce_webhook_success():
+def test_woocommerce_legacy_webhook_cannot_report_mock_success():
     mock_sec_instance = MagicMock()
     mock_sec_instance.validate_hmac.return_value = True
     
@@ -74,5 +74,4 @@ def test_woocommerce_webhook_success():
     
     app.dependency_overrides.clear()
     
-    assert response.status_code == 200
-    assert response.json() == {"status": "Webhook processed"}
+    assert response.status_code == 501
