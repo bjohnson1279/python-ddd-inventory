@@ -60,22 +60,44 @@ async def snapshot(session, tenant, definition, now, actor):
         service = FinancialService(session, tenant, actor)
         rows = await service.balances(start, end) if kind == 'INCOME_STATEMENT' else await service.balances(end=as_of)
         quality = await service.quality(end if kind == 'INCOME_STATEMENT' else as_of)
+        # Bolt Optimization: Avoid multiple O(N) list traversals when calculating aggregate metrics.
+        # Combine aggregations into a single O(N) pass to accumulate all values simultaneously.
         if kind == 'INCOME_STATEMENT':
-            revenue = -sum(r['balanceCents'] for r in rows if r['category'] == 'revenue')
-            expenses = sum(r['balanceCents'] for r in rows if r['category'] == 'expense')
+            revenue = expenses = 0
+            filtered_rows = []
+            for r in rows:
+                if r['category'] == 'revenue':
+                    revenue -= r['balanceCents']
+                    filtered_rows.append(r)
+                elif r['category'] == 'expense':
+                    expenses += r['balanceCents']
+                    filtered_rows.append(r)
             summary = {'revenueCents': revenue, 'expenseCents': expenses, 'profitCents': revenue - expenses}
-            rows = [r for r in rows if r['category'] in ('revenue', 'expense')]
+            rows = filtered_rows
         elif kind == 'BALANCE_SHEET':
-            assets = sum(r['balanceCents'] for r in rows if r['category'] == 'asset')
-            liabilities = -sum(r['balanceCents'] for r in rows if r['category'] == 'liability')
-            equity = -sum(r['balanceCents'] for r in rows if r['category'] == 'equity')
-            earnings = -sum(r['balanceCents'] for r in rows if r['category'] in ('revenue', 'expense'))
+            assets = liabilities = equity = earnings = 0
+            for r in rows:
+                cat = r['category']
+                if cat == 'asset':
+                    assets += r['balanceCents']
+                elif cat == 'liability':
+                    liabilities -= r['balanceCents']
+                elif cat == 'equity':
+                    equity -= r['balanceCents']
+                elif cat in ('revenue', 'expense'):
+                    earnings -= r['balanceCents']
             summary = {'assetsCents': assets, 'liabilitiesCents': liabilities, 'equityCents': equity, 'currentEarningsCents': earnings}
             quality['isBalanced'] = assets == liabilities + equity + earnings
         else:
-            summary = {'totalDebitsCents': sum(max(0, r['balanceCents']) for r in rows),
-                'totalCreditsCents': sum(max(0, -r['balanceCents']) for r in rows)}
-            quality['isBalanced'] = summary['totalDebitsCents'] == summary['totalCreditsCents']
+            total_debits = total_credits = 0
+            for r in rows:
+                bal = r['balanceCents']
+                if bal > 0:
+                    total_debits += bal
+                elif bal < 0:
+                    total_credits -= bal
+            summary = {'totalDebitsCents': total_debits, 'totalCreditsCents': total_credits}
+            quality['isBalanced'] = total_debits == total_credits
         for amount in summary.values():
             checked_cents(amount, signed=True)
         return {'columns': list(rows[0]), 'rows': rows, 'summary': summary, 'currency': 'USD',

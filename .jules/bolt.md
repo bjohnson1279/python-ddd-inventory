@@ -166,3 +166,7 @@
 ## 2026-10-13 - Concurrent save_asn and save_po execution in submit_asn
 **Learning:** In `submit_asn`, sequentially awaiting `repo.save_asn` and `repo.save_po` doubled I/O wait latency because both repository operations were independent.
 **Action:** Use `asyncio.gather(repo.save_asn(valid_asn), repo.save_po(po))` to execute independent repository I/O saves concurrently, reducing endpoint latency by ~42%.
+
+## 2026-10-15 - O(1) single-pass list aggregation for financial snapshots
+**Learning:** Using multiple `sum()` calls with generator comprehensions to calculate different aggregate metrics (like revenue, expenses, assets, liabilities, equity, earnings) from the same list of ledger rows requires multiple O(N) traversals. In large collections, this creates redundant iteration overhead.
+**Action:** Combine the aggregations into a single O(N) `for` loop pass that accumulates all necessary values simultaneously, rather than making multiple passes over the same list.
