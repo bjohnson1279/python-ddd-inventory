@@ -170,3 +170,6 @@
 ## 2026-10-15 - O(1) single-pass list aggregation for financial snapshots
 **Learning:** Using multiple `sum()` calls with generator comprehensions to calculate different aggregate metrics (like revenue, expenses, assets, liabilities, equity, earnings) from the same list of ledger rows requires multiple O(N) traversals. In large collections, this creates redundant iteration overhead.
 **Action:** Combine the aggregations into a single O(N) `for` loop pass that accumulates all necessary values simultaneously, rather than making multiple passes over the same list.
+## 2024-10-16 - Single-pass list aggregation for financial snapshots
+**Learning:** Using multiple `sum()` calls with generator comprehensions to calculate different aggregate metrics (like matching quantities and values across age buckets or financial accounts) from the same list of layers or rows requires multiple O(N) traversals. In large collections like reports, this creates redundant iteration overhead.
+**Action:** Combine the aggregations into a single O(N) `for` loop pass that accumulates all necessary values simultaneously (e.g., in `INVENTORY_VALUATION` and `INVENTORY_AGING` snapshots), rather than making multiple passes over the same list.

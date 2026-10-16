@@ -158,21 +158,39 @@ async def snapshot(session, tenant, definition, now, actor):
             grouped.setdefault(layer.stock_id, []).append(layer)
         for stock, row in zip(stocks, rows):
             owned = grouped.get(stock.id, [])
-            matched = sum(l.remaining_quantity for l in owned) == stock.quantity
+
+            # Bolt Optimization: Single-pass list aggregation for financial snapshots
+            # Avoids multiple O(N) traversals over `owned` layers for matched, priced, and value.
+            owned_quantity = 0
+            owned_value = 0 if kind == 'INVENTORY_VALUATION' else None
+            all_priced = True
+
+            buckets = {'age0To30': 0, 'age31To60': 0, 'age61To90': 0, 'ageOver90': 0} if kind != 'INVENTORY_VALUATION' else None
+
+            for layer in owned:
+                owned_quantity += layer.remaining_quantity
+                if kind == 'INVENTORY_VALUATION':
+                    if layer.remaining_value_cents is None:
+                        all_priced = False
+                    elif owned_value is not None:
+                        owned_value += layer.remaining_value_cents
+                else:
+                    days = max(0, (now - utc(layer.received_at)).days)
+                    bucket = 'age0To30' if days <= 30 else 'age31To60' if days <= 60 else 'age61To90' if days <= 90 else 'ageOver90'
+                    buckets[bucket] += layer.remaining_quantity
+
+            matched = owned_quantity == stock.quantity
+
             if kind == 'INVENTORY_VALUATION':
-                priced = matched and all(l.remaining_value_cents is not None for l in owned)
-                value = sum(l.remaining_value_cents for l in owned) if priced else None
+                priced = matched and all_priced
+                value = owned_value if priced else None
                 if value is not None:
                     checked_cents(value)
                 row.update(valueCents=value, complete=priced)
                 complete = complete and priced
             else:
-                buckets = {'age0To30': 0, 'age31To60': 0, 'age61To90': 0, 'ageOver90': 0}
-                for layer in owned:
-                    days = max(0, (now - utc(layer.received_at)).days)
-                    bucket = 'age0To30' if days <= 30 else 'age31To60' if days <= 60 else 'age61To90' if days <= 90 else 'ageOver90'
-                    buckets[bucket] += layer.remaining_quantity
-                row.update(**buckets, unknownAgeQuantity=max(0, stock.quantity - sum(buckets.values())), complete=matched)
+                bucket_sum = buckets['age0To30'] + buckets['age31To60'] + buckets['age61To90'] + buckets['ageOver90']
+                row.update(**buckets, unknownAgeQuantity=max(0, stock.quantity - bucket_sum), complete=matched)
                 complete = complete and matched
     columns = ['sku', 'locationId', 'quantity', 'allocated', 'available', 'stockVersion', 'baseUnit', 'uomVersion']
     columns += ['valueCents', 'complete'] if kind == 'INVENTORY_VALUATION' else ['age0To30', 'age31To60', 'age61To90', 'ageOver90', 'unknownAgeQuantity', 'complete'] if kind == 'INVENTORY_AGING' else []
