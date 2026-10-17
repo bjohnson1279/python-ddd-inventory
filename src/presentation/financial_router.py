@@ -225,8 +225,17 @@ async def balances(request, session, start=None, end=None):
 @router.get('/trial-balance')
 async def trial_balance(request: Request, asOf: date | None = None, session: AsyncSession = Depends(get_db_session)):
     rows = await balances(request, session, end=asOf)
-    debit = sum(max(0, row['balanceCents']) for row in rows)
-    credit = sum(max(0, -row['balanceCents']) for row in rows)
+
+    # Bolt Optimization: Single-pass list aggregation to avoid multiple O(N) traversals
+    debit = 0
+    credit = 0
+    for row in rows:
+        bal = row['balanceCents']
+        if bal > 0:
+            debit += bal
+        elif bal < 0:
+            credit -= bal
+
     try:
         checked_cents(debit)
         checked_cents(credit)
@@ -240,8 +249,18 @@ async def trial_balance(request: Request, asOf: date | None = None, session: Asy
 @router.get('/income-statement')
 async def income(request: Request, fromDate: date | None = None, toDate: date | None = None, session: AsyncSession = Depends(get_db_session)):
     rows = await balances(request, session, fromDate, toDate)
-    revenue = -sum(row['balanceCents'] for row in rows if row['category'] == 'revenue')
-    expenses = sum(row['balanceCents'] for row in rows if row['category'] == 'expense')
+
+    # Bolt Optimization: Single-pass list aggregation to avoid multiple O(N) traversals
+    revenue = 0
+    expenses = 0
+    for row in rows:
+        cat = row['category']
+        bal = row['balanceCents']
+        if cat == 'revenue':
+            revenue -= bal
+        elif cat == 'expense':
+            expenses += bal
+
     try:
         for value in (revenue, expenses, revenue - expenses):
             checked_cents(value, signed=True)
@@ -254,10 +273,24 @@ async def income(request: Request, fromDate: date | None = None, toDate: date | 
 @router.get('/balance-sheet')
 async def balance_sheet(request: Request, asOf: date | None = None, session: AsyncSession = Depends(get_db_session)):
     rows = await balances(request, session, end=asOf)
-    assets = sum(r['balanceCents'] for r in rows if r['category'] == 'asset')
-    liabilities = -sum(r['balanceCents'] for r in rows if r['category'] == 'liability')
-    equity = -sum(r['balanceCents'] for r in rows if r['category'] == 'equity')
-    earnings = -sum(r['balanceCents'] for r in rows if r['category'] in ('revenue', 'expense'))
+
+    # Bolt Optimization: Single-pass list aggregation to avoid multiple O(N) traversals
+    assets = 0
+    liabilities = 0
+    equity = 0
+    earnings = 0
+    for r in rows:
+        cat = r['category']
+        bal = r['balanceCents']
+        if cat == 'asset':
+            assets += bal
+        elif cat == 'liability':
+            liabilities -= bal
+        elif cat == 'equity':
+            equity -= bal
+        elif cat in ('revenue', 'expense'):
+            earnings -= bal
+
     try:
         for value in (assets, liabilities, equity, earnings):
             checked_cents(value, signed=True)
