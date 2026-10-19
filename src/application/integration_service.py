@@ -175,9 +175,40 @@ async def dispatch_head(session, tenant, connection_id, *, transport=None):
     try:
         raw = json.dumps(payload, separators=(',', ':'), sort_keys=True, allow_nan=False).encode()
         signature = hmac.new(setting(secret_ref, secret=True).encode(), raw, hashlib.sha256).hexdigest()
-        async with httpx.AsyncClient(timeout=15, follow_redirects=False, trust_env=False, transport=transport) as client:
-            response = await client.post(endpoint(endpoint_ref), content=raw, headers={'Content-Type': 'application/json',
-                'Idempotency-Key': identifier, 'X-Inventory-Delivery-Id': identifier, 'X-Inventory-Signature': signature})
+
+        target_url = endpoint(endpoint_ref)
+
+        async def make_request(target_url, raw, identifier, signature, transport):
+            if transport is None:
+                import socket
+                import ipaddress
+                import asyncio
+                from urllib.parse import urlparse
+                parsed = urlparse(target_url)
+                try:
+                    loop = asyncio.get_running_loop()
+                    addr_infos = await loop.getaddrinfo(parsed.hostname, None)
+                    resolved_ip = None
+                    for addr in addr_infos:
+                        ip_str = addr[4][0]
+                        ip_obj = ipaddress.ip_address(ip_str)
+                        if (ip_obj.is_private or ip_obj.is_loopback or
+                            ip_obj.is_link_local or ip_obj.is_unspecified or ip_obj.is_multicast):
+                            raise ValueError('SSRF blocked: local or internal IP addresses are not allowed')
+                        resolved_ip = ip_str
+                    if resolved_ip is None:
+                        raise ValueError('Invalid Webhook URL: unable to resolve hostname')
+                except socket.gaierror:
+                    raise ValueError('Invalid Webhook URL: unable to resolve hostname')
+
+                # TOCTOU Mitigation: Perform SSRF validation immediately before HTTP request.
+                # However, to avoid breaking TLS, we still request the URL directly and rely on the
+                # immediate prior validation.
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False, trust_env=False, transport=transport) as client:
+                return await client.post(target_url, content=raw, headers={'Content-Type': 'application/json',
+                    'Idempotency-Key': identifier, 'X-Inventory-Delivery-Id': identifier, 'X-Inventory-Signature': signature})
+
+        response = await make_request(target_url, raw, identifier, signature, transport)
         if response.status_code < 200 or response.status_code >= 300:
             raise ValueError('RemoteHTTP' + str(response.status_code))
         acknowledgement = response.json()
@@ -188,7 +219,7 @@ async def dispatch_head(session, tenant, connection_id, *, transport=None):
             raise ValueError('MissingExternalReference')
     except Exception as exc:
         # Never persist remote bodies, secret values, URLs or exception text.
-        error = str(exc) if type(exc) is ValueError and re.fullmatch(r'RemoteHTTP\d{3}|InvalidAcknowledgement|MissingExternalReference', str(exc)) else type(exc).__name__
+        error = str(exc) if type(exc) is ValueError and re.fullmatch(r'RemoteHTTP\d{3}|InvalidAcknowledgement|MissingExternalReference|SSRF blocked: local or internal IP addresses are not allowed|Invalid Webhook URL: unable to resolve hostname', str(exc)) else type(exc).__name__
     if session.bind.dialect.name == 'postgresql':
         from src.application.workers.outbox_worker import set_worker_tenant
         await set_worker_tenant(session, tenant)
