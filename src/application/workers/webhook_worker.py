@@ -66,7 +66,8 @@ class WebhookDeliveryEngine:
         # it significantly reduces the race condition window to milliseconds.
         parsed = urllib.parse.urlparse(item["url"])
         try:
-            addr_infos = socket.getaddrinfo(parsed.hostname, None)
+            loop = asyncio.get_running_loop()
+            addr_infos = await loop.getaddrinfo(parsed.hostname, None)
             for addr in addr_infos:
                 ip_str = addr[4][0]
                 ip_obj = ipaddress.ip_address(ip_str)
