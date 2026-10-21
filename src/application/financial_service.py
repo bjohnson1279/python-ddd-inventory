@@ -180,8 +180,14 @@ class FinancialService:
             raise StockConflict('Only a current unresolved financial source can be resolved')
         result = await self.post({**data, 'description': data['reason']}, 'SOURCE_RESOLUTION', source_id=source.movement_id)
         source.status, source.journal_id, source.version = 'RESOLVED', result['id'], source.version + 1
-        credits = sum(l['amountCents'] for l in data['lines'] if l['accountCode'] == '2100' and l['type'] == 'credit')
-        debits = sum(l['amountCents'] for l in data['lines'] if l['accountCode'] == '2100' and l['type'] == 'debit')
+        # Bolt Optimization: Single-pass list aggregation to avoid multiple O(N) traversals
+        credits, debits = 0, 0
+        for l in data['lines']:
+            if l['accountCode'] == '2100':
+                if l['type'] == 'credit':
+                    credits += l['amountCents']
+                elif l['type'] == 'debit':
+                    debits += l['amountCents']
         source.amount_cents = credits - debits if source.kind == 'RECEIPT' else result['totalDebitsCents']
         if source.kind == 'RECEIPT' and source.amount_cents <= 0:
             raise ValueError('Receipt resolution must establish a positive goods-received liability')
