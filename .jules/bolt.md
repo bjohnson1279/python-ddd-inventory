@@ -177,3 +177,6 @@
 ## 2026-10-18 - Single-pass list aggregation for WAC Costing
 **Learning:** Using multiple generator comprehensions (like `sum()`, `all()`, or list comprehensions) to calculate different aggregate metrics from the same list of objects requires multiple O(N) traversals. In large collections (like calculating Weighted Average Cost over many batches), this creates redundant iteration overhead.
 **Action:** Combine the aggregations into a single O(N) `for` loop pass that accumulates all necessary values simultaneously, rather than making multiple passes over the same list.
+## 2024-10-24 - Single-pass list aggregation for financial resolutions
+**Learning:** In `financial_service.py`, resolving a financial source calculated `credits` and `debits` by performing two separate O(N) traversals over `data['lines']` using `sum()` with generator comprehensions. For large line-item arrays, this creates redundant iteration overhead.
+**Action:** Combine the aggregations into a single O(N) `for` loop pass that accumulates `credits` and `debits` simultaneously, rather than making multiple passes over the same list.
