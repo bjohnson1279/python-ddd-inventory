@@ -180,3 +180,7 @@
 ## 2024-10-24 - Single-pass list aggregation for financial resolutions
 **Learning:** In `financial_service.py`, resolving a financial source calculated `credits` and `debits` by performing two separate O(N) traversals over `data['lines']` using `sum()` with generator comprehensions. For large line-item arrays, this creates redundant iteration overhead.
 **Action:** Combine the aggregations into a single O(N) `for` loop pass that accumulates `credits` and `debits` simultaneously, rather than making multiple passes over the same list.
+
+## 2024-10-24 - Single-pass list aggregation for workforce tasks
+**Learning:** In `workforce_router.py`, building the operator summary metrics calculated `total_lines`, `accurate_lines`, `reportedPickSeconds` and `traversalDistanceMeters` by performing four separate O(N) traversals over the same `tasks` list using `sum()` with generator comprehensions and list comprehension. For large sets of tasks, this creates redundant iteration overhead.
+**Action:** Combine the aggregations into a single O(N) `for` loop pass that accumulates all necessary values simultaneously, rather than making multiple passes over the same list.

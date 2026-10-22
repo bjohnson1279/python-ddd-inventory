@@ -286,14 +286,32 @@ async def mutate(session, request, data, operation, identifier=None):
 async def summary(session, tenant, profile, start, end):
     tasks = list(await session.scalars(select(Task).join(Shift, Shift.id == Task.shift_id).where(Task.tenant_id == tenant,
         Shift.tenant_id == tenant, Shift.operator_id == profile.id, Task.created_at >= start, Task.created_at < end)))
-    picks = [t for t in tasks if t.kind == 'PICK']
-    seconds = sum(t.duration_seconds for t in picks)
-    total, accurate = sum(t.total_lines for t in tasks), sum(t.accurate_lines for t in tasks)
-    return {'recordedPickTasks': len(picks), 'reportedPickSeconds': seconds,
-        'picksPerReportedHour': len(picks)*3600/seconds if seconds else None,
+
+    pick_count = 0
+    seconds = 0
+    total = 0
+    accurate = 0
+    distance_meters = 0.0
+    distance_complete = bool(tasks)
+
+    for t in tasks:
+        total += t.total_lines
+        accurate += t.accurate_lines
+        if t.kind == 'PICK':
+            pick_count += 1
+            seconds += t.duration_seconds
+
+        if distance_complete:
+            if t.distance_meters is not None:
+                distance_meters += t.distance_meters
+            else:
+                distance_complete = False
+
+    return {'recordedPickTasks': pick_count, 'reportedPickSeconds': seconds,
+        'picksPerReportedHour': pick_count*3600/seconds if seconds else None,
         'countAccuracyPercent': accurate*100/total if total else None, 'countLines': total,
-        'traversalDistanceMeters': sum(t.distance_meters for t in tasks) if tasks and all(t.distance_meters is not None for t in tasks) else None,
-        'distanceComplete': bool(tasks) and all(t.distance_meters is not None for t in tasks),
+        'traversalDistanceMeters': distance_meters if distance_complete else None,
+        'distanceComplete': distance_complete,
         'timingSource': 'OPERATOR_REPORTED', 'from': start.isoformat(), 'toExclusive': end.isoformat()}
 
 @router.get('/me')
