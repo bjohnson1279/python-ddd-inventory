@@ -119,8 +119,17 @@ async def valuation_rows(session, tenant, location, method, sku=None):
     grouped = {}
     for stock in stocks:
         remaining = [layer for layer in grouped_layers.get(stock.id, []) if layer.remaining_quantity]
-        if sum(layer.remaining_quantity for layer in remaining) != stock.quantity or any(
-                layer.remaining_value_cents is None for layer in remaining):
+        rem_quantity = 0
+        rem_value = 0
+        any_unpriced = False
+        for layer in remaining:
+            rem_quantity += layer.remaining_quantity
+            if layer.remaining_value_cents is None:
+                any_unpriced = True
+            else:
+                rem_value += layer.remaining_value_cents
+
+        if rem_quantity != stock.quantity or any_unpriced:
             raise HTTPException(409, f'Unpriced or inconsistent stock for {stock.sku} at {stock.location_id}')
         product = products.get(stock.sku)
         if not product:
@@ -129,7 +138,7 @@ async def valuation_rows(session, tenant, location, method, sku=None):
             'name': product.name, 'costingMethod': method.value, 'totalQuantity': 0,
             'totalValueCents': 0, '_layers': []})
         row['totalQuantity'] += stock.quantity
-        row['totalValueCents'] += sum(layer.remaining_value_cents for layer in remaining)
+        row['totalValueCents'] += rem_value
         row['_layers'].extend(remaining)
     for row in grouped.values():
         validate_total_value(row['totalValueCents'])
@@ -154,8 +163,11 @@ async def valuation_report(request: Request, locationId: str | None = None, meth
             transit_query = transit_query.where(TransferModel.destination_location_id == locationId)
         for transfer in await session.scalars(transit_query):
             for item in transfer.items:
-                if any(batch['costCents'] is None for batch in item['batches']):
-                    raise HTTPException(409, 'Unpriced in-transit stock')
+                batch_cost = 0
+                for batch in item['batches']:
+                    if batch['costCents'] is None:
+                        raise HTTPException(409, 'Unpriced in-transit stock')
+                    batch_cost += batch['costCents']
                 row = grouped.get(item['sku'])
                 if row is None:
                     product = products.get(item['sku'])
@@ -164,7 +176,7 @@ async def valuation_report(request: Request, locationId: str | None = None, meth
                     row = grouped[item['sku']] = {'variantId': product.id, 'sku': product.sku, 'name': product.name,
                         'costingMethod': configured, 'totalQuantity': 0, 'totalValueCents': 0, 'unitCostCents': 0}
                 row['inTransitQuantity'] = row.get('inTransitQuantity', 0) + item['quantity']
-                row['inTransitValueCents'] = row.get('inTransitValueCents', 0) + sum(batch['costCents'] for batch in item['batches'])
+                row['inTransitValueCents'] = row.get('inTransitValueCents', 0) + batch_cost
         from src.infrastructure.serial_kit_models import SerialModel, TrackingModel
         tracked = set(await session.scalars(select(TrackingModel.sku).where(TrackingModel.tenant_id == current_tenant(request))))
         serial_query = select(SerialModel).where(SerialModel.tenant_id == current_tenant(request), SerialModel.status == 'transferred')
@@ -279,9 +291,17 @@ async def price_layer(layer_id: str, data: PriceDTO, request: Request,
         all_layers = await load_layers(session, tenant, stock)
         layer.unit_cost_cents = data.unitCostCents
         layer.remaining_value_cents = layer.remaining_quantity * data.unitCostCents
-        validate_total_value(sum(l.remaining_value_cents or 0 for l in all_layers))
-        if config.costing_method == 'WAC' and all(l.remaining_value_cents is not None for l in all_layers if l.remaining_quantity):
-            redistribute_value(all_layers, sum(l.remaining_value_cents or 0 for l in all_layers))
+        total_remaining_value = 0
+        all_priced = True
+        for l in all_layers:
+            if l.remaining_value_cents is not None:
+                total_remaining_value += l.remaining_value_cents
+            elif l.remaining_quantity:
+                all_priced = False
+
+        validate_total_value(total_remaining_value)
+        if config.costing_method == 'WAC' and all_priced:
+            redistribute_value(all_layers, total_remaining_value)
         await session.execute(update(StockModel).where(StockModel.id == stock.id).values(version=StockModel.version + 1))
         result = {'layerId': layer.id, 'sku': layer.sku, 'locationId': layer.location_id,
                   'unitCostCents': data.unitCostCents, 'costingMethod': config.costing_method,

@@ -184,3 +184,7 @@
 ## 2024-10-24 - Single-pass list aggregation for workforce tasks
 **Learning:** In `workforce_router.py`, building the operator summary metrics calculated `total_lines`, `accurate_lines`, `reportedPickSeconds` and `traversalDistanceMeters` by performing four separate O(N) traversals over the same `tasks` list using `sum()` with generator comprehensions and list comprehension. For large sets of tasks, this creates redundant iteration overhead.
 **Action:** Combine the aggregations into a single O(N) `for` loop pass that accumulates all necessary values simultaneously, rather than making multiple passes over the same list.
+
+## 2024-10-25 - Single-pass list aggregation for accounting valuation and layer pricing
+**Learning:** In `accounting_router.py`, building the valuation rows and reports calculated layer remaining values, quantities, and unpriced checks by performing multiple separate O(N) traversals over the same layer lists using `sum()` and `any()` with generator comprehensions. For large sets of cost layers, this creates redundant iteration overhead.
+**Action:** Combine the aggregations and checks into a single O(N) `for` loop pass that accumulates `totalValueCents`, `totalQuantity`, and evaluates `any_unpriced` simultaneously, rather than making multiple passes over the same list.
