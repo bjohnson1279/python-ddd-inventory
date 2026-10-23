@@ -13,6 +13,7 @@ from src.infrastructure.transfer_models import InventoryActionModel as Action
 from src.infrastructure.financial_posting import database_now
 from src.application.costing_service import locked_config
 from src.infrastructure.auth.identity import current_tenant
+from src.infrastructure.auth.rbac import requires_roles
 from src.application.report_service import owned, enqueue, authorize_definition, process_job, scheduler_tick, next_run, job_dto, schedule_dto
 from src.application.retail_reports import validate_definition, export_csv, required_permission
 
@@ -117,16 +118,19 @@ async def command(request, session, data, operation, identifier=None):
 
 @router.post('')
 @router.post('/')
+@requires_roles(['ADMIN', 'MANAGER', 'ACCOUNTANT'])
 async def create_report(data: Create, request: Request, session: AsyncSession = Depends(get_db_session)):
     return await command(request, session, data, 'create')
 
 @router.get('')
 @router.get('/')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'VIEWER', 'ACCOUNTANT'])
 async def list_reports(request: Request, session: AsyncSession = Depends(get_db_session)):
     rows = await session.scalars(select(Definition).where(Definition.tenant_id == current_tenant(request)).order_by(Definition.id))
     return {'reports': [definition_dto(row) for row in rows if required_permission(row.payload) in request.state.permissions]}
 
 @router.get('/executions')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'VIEWER', 'ACCOUNTANT'])
 async def executions(request: Request, limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0), session: AsyncSession = Depends(get_db_session)):
     rows = await session.scalars(select(Job).where(Job.tenant_id == current_tenant(request)).order_by(Job.created_at.desc(), Job.id).limit(limit).offset(offset))
     return [job_dto(row) for row in rows if required_permission(row.definition) in request.state.permissions]
@@ -142,10 +146,12 @@ async def readable_job(request, session, identifier):
         raise HTTPException(403, str(exc)) from exc
 
 @router.get('/executions/{identifier}')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'VIEWER', 'ACCOUNTANT'])
 async def execution(identifier: str, request: Request, session: AsyncSession = Depends(get_db_session)):
     return job_dto(await readable_job(request, session, identifier))
 
 @router.get('/executions/{identifier}/content')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'VIEWER', 'ACCOUNTANT'])
 async def content(identifier: str, request: Request, session: AsyncSession = Depends(get_db_session)):
     job = await readable_job(request, session, identifier)
     if job.status != 'COMPLETED' or job.result is None:
@@ -154,21 +160,25 @@ async def content(identifier: str, request: Request, session: AsyncSession = Dep
     return JSONResponse(job.result, headers=headers) if job.format == 'json' else Response(export_csv(job.result), media_type='text/csv; charset=utf-8', headers=headers)
 
 @router.post('/executions/{identifier}/process')
+@requires_roles(['ADMIN', 'MANAGER', 'ACCOUNTANT'])
 async def process(identifier: str, request: Request, session: AsyncSession = Depends(get_db_session)):
     await readable_job(request, session, identifier)
     return await process_job(session, current_tenant(request), identifier)
 
 @router.post('/executions/{identifier}/retry')
+@requires_roles(['ADMIN', 'MANAGER', 'ACCOUNTANT'])
 async def retry(identifier: str, data: Versioned, request: Request, session: AsyncSession = Depends(get_db_session)):
     return await command(request, session, data, 'retry', identifier)
 
 @router.get('/schedules')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'VIEWER', 'ACCOUNTANT'])
 async def schedules(request: Request, session: AsyncSession = Depends(get_db_session)):
     rows = await session.execute(select(Schedule, Definition).join(Definition, Definition.id == Schedule.report_id).where(
         Schedule.tenant_id == current_tenant(request), Definition.tenant_id == current_tenant(request)).order_by(Schedule.next_run_at, Schedule.id))
     return [schedule_dto(row) for row, definition in rows if required_permission(definition.payload) in request.state.permissions]
 
 @router.post('/schedules/{identifier}/active')
+@requires_roles(['ADMIN', 'MANAGER', 'ACCOUNTANT'])
 async def toggle_schedule(identifier: str, data: Toggle, request: Request, session: AsyncSession = Depends(get_db_session)):
     return await command(request, session, data, 'toggle', identifier)
 
@@ -177,10 +187,12 @@ async def tick(request: Request, session: AsyncSession = Depends(get_db_session)
     return await scheduler_tick(session, current_tenant(request))
 
 @router.post('/{identifier}/execute', status_code=202)
+@requires_roles(['ADMIN', 'MANAGER', 'ACCOUNTANT'])
 async def execute_report(identifier: str, request: Request, data: Execute | None = Body(default=None), session: AsyncSession = Depends(get_db_session)):
     return await command(request, session, data or Execute(), 'execute', identifier)
 
 @router.post('/{identifier}/schedule')
+@requires_roles(['ADMIN', 'MANAGER', 'ACCOUNTANT'])
 async def schedule_report(identifier: str, request: Request, data: ScheduleCommand | None = Body(default=None), session: AsyncSession = Depends(get_db_session)):
     if data is None:
         try:
@@ -191,5 +203,5 @@ async def schedule_report(identifier: str, request: Request, data: ScheduleComma
     return await command(request, session, data, 'schedule', identifier)
 
 @router.get('/shared/{token}')
-async def shared(token: str):
+async def shared(token: str, request: Request):
     raise HTTPException(404, 'Report share not found')
