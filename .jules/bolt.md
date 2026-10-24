@@ -188,3 +188,7 @@
 ## 2024-10-25 - Single-pass list aggregation for accounting valuation and layer pricing
 **Learning:** In `accounting_router.py`, building the valuation rows and reports calculated layer remaining values, quantities, and unpriced checks by performing multiple separate O(N) traversals over the same layer lists using `sum()` and `any()` with generator comprehensions. For large sets of cost layers, this creates redundant iteration overhead.
 **Action:** Combine the aggregations and checks into a single O(N) `for` loop pass that accumulates `totalValueCents`, `totalQuantity`, and evaluates `any_unpriced` simultaneously, rather than making multiple passes over the same list.
+
+## 2024-10-25 - Single-pass list aggregation for purchase order dtos
+**Learning:** In `procurement_service.py`, generating a DTO for a purchase order computed `totalCostCents` and `outstandingQuantity` using two separate `sum()` generator comprehensions over the same `items` list. For large POs with many line items, this redundant iteration creates unnecessary overhead.
+**Action:** Combine the calculations into a single O(N) `for` loop pass that accumulates both total cost and outstanding quantity simultaneously.

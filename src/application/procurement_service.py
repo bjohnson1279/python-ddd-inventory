@@ -31,12 +31,25 @@ def supplier_dto(row):
 
 def po_dto(row):
     items = copy.deepcopy(row.items)
+
+    # Bolt Optimization: Single-pass list aggregation
+    # Impact: Replaces two separate O(N) traversals with a single pass over items
+    total_cost_cents = 0
+    outstanding_quantity = 0
+
+    for i in items:
+        total_cost_cents += i['quantity'] * i['unitCostCents']
+        outstanding_quantity += i['quantity'] - i.get('receivedQuantity', 0)
+
+    if row.status == 'CANCELLED':
+        outstanding_quantity = 0
+
     return {'id': row.id, 'tenantId': row.tenant_id, 'supplier': row.supplier_name,
             'supplierId': row.supplier_id, 'locationId': row.location_id, 'status': row.status.lower(),
             'version': row.version, 'currency': 'USD', 'items': items, 'createdAt': utc(row.created_at).isoformat(),
             'expectedDeliveryDate': utc(row.expected_delivery_date).isoformat() if row.expected_delivery_date else None,
-            'totalCostCents': sum(i['quantity'] * i['unitCostCents'] for i in items),
-            'outstandingQuantity': 0 if row.status == 'CANCELLED' else sum(i['quantity'] - i['receivedQuantity'] for i in items)}
+            'totalCostCents': total_cost_cents,
+            'outstandingQuantity': outstanding_quantity}
 
 
 def policy_dto(row):
