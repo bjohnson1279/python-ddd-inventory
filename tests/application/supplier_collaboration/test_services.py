@@ -30,7 +30,7 @@ def test_asn_submission_invalid_status():
         items=[ASNLineItem(sku="SKU1", shipped_quantity=100)]
     )
     
-    with pytest.raises(ValueError, match="Cannot submit ASN for PO"):
+    with pytest.raises(ValueError, match="Cannot mark purchase order as shipped"):
         service.validate_and_submit_asn(po, asn)
 
 def test_otif_calculation_success():

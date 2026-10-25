@@ -3,17 +3,14 @@ from src.domain.supplier_collaboration.entity import AdvanceShippingNotice, Purc
 
 class ASNSubmissionService:
     def validate_and_submit_asn(self, po: PurchaseOrder, asn: AdvanceShippingNotice) -> AdvanceShippingNotice:
-        if po.status not in ['ISSUED', 'ACKNOWLEDGED']:
-            raise ValueError(f"Cannot submit ASN for PO in status {po.status}")
-            
         if po.supplier_id != asn.supplier_id:
             raise ValueError("ASN supplier does not match PO supplier")
             
         if not asn.items:
             raise ValueError("ASN must contain at least one line item")
             
-        # Set PO status to shipped
-        po.status = 'SHIPPED'
+        # Set PO status to shipped via domain method
+        po.mark_as_shipped()
         
         # In a full implementation, we'd emit an ASNSubmittedEvent 
         # to trigger the creation of ExpectedReceipts in the Warehouse context.
