@@ -63,10 +63,18 @@ async def apply_costing(session, tenant, stock, operation, amount, method,
             session.add(layer)
             layers.append(layer)
             created.append(layer.id)
-        validate_total_value(sum(layer.remaining_value_cents or 0 for layer in layers))
-        if method == CostingMethod.WAC and all(
-                layer.remaining_value_cents is not None for layer in layers if layer.remaining_quantity):
-            redistribute_value(layers, sum(layer.remaining_value_cents or 0 for layer in layers))
+        # Bolt Optimization: Single-pass list aggregation for WAC costing
+        # Impact: Replaces three separate O(N) traversals (sum, all, sum) with a single pass
+        total_value_cents = 0
+        wac_priced = True
+        for layer in layers:
+            total_value_cents += layer.remaining_value_cents or 0
+            if layer.remaining_quantity and layer.remaining_value_cents is None:
+                wac_priced = False
+
+        validate_total_value(total_value_cents)
+        if method == CostingMethod.WAC and wac_priced:
+            redistribute_value(layers, total_value_cents)
         return {'costingMethod': method.value, 'costOfGoodsSoldCents': None,
                 'costLayerId': created[0], 'costLayerIds': created,
                 'costStatus': 'PRICED' if value is not None else 'UNPRICED'}
