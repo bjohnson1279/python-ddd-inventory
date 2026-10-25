@@ -192,3 +192,7 @@
 ## 2024-10-25 - Single-pass list aggregation for purchase order dtos
 **Learning:** In `procurement_service.py`, generating a DTO for a purchase order computed `totalCostCents` and `outstandingQuantity` using two separate `sum()` generator comprehensions over the same `items` list. For large POs with many line items, this redundant iteration creates unnecessary overhead.
 **Action:** Combine the calculations into a single O(N) `for` loop pass that accumulates both total cost and outstanding quantity simultaneously.
+
+## 2024-10-25 - Single-pass list aggregation for WAC receipt costing
+**Learning:** In `costing_service.py`, computing layer receipt costs using multiple generator comprehensions (like `sum()`, `all()`, and another `sum()`) over the same list of layers creates redundant O(N) traversals. In large sets of incoming items, this iteration overhead compounds unnecessarily.
+**Action:** Combine the aggregations into a single O(N) `for` loop pass that simultaneously accumulates `total_value_cents` and evaluates `wac_priced` rather than making three separate O(N) passes over the layers.
