@@ -22,6 +22,17 @@ class PurchaseOrder:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     issued_at: datetime = field(default_factory=datetime.utcnow)
 
+    def acknowledge(self, acknowledged_at: Optional[datetime] = None) -> None:
+        if self.status != 'ISSUED':
+            raise ValueError(f"Cannot acknowledge purchase order in status '{self.status}'")
+        self.status = 'ACKNOWLEDGED'
+        self.acknowledged_date = acknowledged_at or datetime.utcnow()
+
+    def mark_as_shipped(self) -> None:
+        if self.status not in ('ISSUED', 'ACKNOWLEDGED'):
+            raise ValueError(f"Cannot mark purchase order as shipped from status '{self.status}'")
+        self.status = 'SHIPPED'
+
 @dataclass
 class ASNLineItem:
     sku: str
