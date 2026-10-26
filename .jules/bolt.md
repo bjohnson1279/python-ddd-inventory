@@ -196,3 +196,7 @@
 ## 2024-10-25 - Single-pass list aggregation for WAC receipt costing
 **Learning:** In `costing_service.py`, computing layer receipt costs using multiple generator comprehensions (like `sum()`, `all()`, and another `sum()`) over the same list of layers creates redundant O(N) traversals. In large sets of incoming items, this iteration overhead compounds unnecessarily.
 **Action:** Combine the aggregations into a single O(N) `for` loop pass that simultaneously accumulates `total_value_cents` and evaluates `wac_priced` rather than making three separate O(N) passes over the layers.
+
+## 2024-10-25 - Single-pass list aggregation for WAC costing in restorations
+**Learning:** In `return_service.py` and `transfer_service.py`, computing layer restoration costs using multiple generator comprehensions (like `sum()` and `all()`) over the same list of layers creates redundant O(N) traversals. In large sets of restored items, this iteration overhead compounds unnecessarily.
+**Action:** Combine the aggregations into a single O(N) `for` loop pass that simultaneously accumulates `total` and evaluates `wac_priced` rather than making separate O(N) passes over the layers.

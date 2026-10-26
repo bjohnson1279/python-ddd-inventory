@@ -219,9 +219,16 @@ class ReturnService:
             self.session.add(layer)
             layers.append(layer)
             created.append(layer.id)
-        total = sum(l.remaining_value_cents or 0 for l in layers)
+        # Bolt Optimization: Single-pass list aggregation for WAC costing
+        # Impact: Replaces two separate O(N) traversals (sum, all) with a single pass
+        total = 0
+        wac_priced = True
+        for layer in layers:
+            total += layer.remaining_value_cents or 0
+            if layer.remaining_quantity and layer.remaining_value_cents is None:
+                wac_priced = False
         validate_total_value(total)
-        if self.config.costing_method == 'WAC' and all(l.remaining_value_cents is not None for l in layers if l.remaining_quantity):
+        if self.config.costing_method == 'WAC' and wac_priced:
             redistribute_value(layers, total)
         return created
 
