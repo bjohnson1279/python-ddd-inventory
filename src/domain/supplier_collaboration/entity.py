@@ -1,3 +1,4 @@
+from src.domain.product.value_objects import SKU
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List
@@ -35,7 +36,7 @@ class PurchaseOrder:
 
 @dataclass
 class ASNLineItem:
-    sku: str
+    sku: SKU
     shipped_quantity: int
     lot_number: Optional[str] = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
