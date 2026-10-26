@@ -1,3 +1,4 @@
+from src.domain.product.value_objects import SKU
 import pytest
 from datetime import datetime, timedelta
 from src.domain.supplier_collaboration.entity import PurchaseOrder, AdvanceShippingNotice, ASNLineItem
@@ -11,7 +12,7 @@ def test_asn_submission_valid():
         supplier_id="sup1",
         tracking_number="TRK123",
         estimated_delivery_date=datetime.utcnow(),
-        items=[ASNLineItem(sku="SKU1", shipped_quantity=100)]
+        items=[ASNLineItem(sku=SKU("SKU1"), shipped_quantity=100)]
     )
     
     result_asn = service.validate_and_submit_asn(po, asn)
@@ -27,7 +28,7 @@ def test_asn_submission_invalid_status():
         supplier_id="sup1",
         tracking_number="TRK123",
         estimated_delivery_date=datetime.utcnow(),
-        items=[ASNLineItem(sku="SKU1", shipped_quantity=100)]
+        items=[ASNLineItem(sku=SKU("SKU1"), shipped_quantity=100)]
     )
     
     with pytest.raises(ValueError, match="Cannot mark purchase order as shipped"):
@@ -41,7 +42,7 @@ def test_otif_calculation_success():
         supplier_id="sup1",
         tracking_number="TRK",
         estimated_delivery_date=now + timedelta(days=2),
-        items=[ASNLineItem(sku="SKU1", shipped_quantity=50)]
+        items=[ASNLineItem(sku=SKU("SKU1"), shipped_quantity=50)]
     )
     
     actual_receipt_date = now + timedelta(days=1)
@@ -62,7 +63,7 @@ def test_otif_calculation_late_and_short():
         supplier_id="sup1",
         tracking_number="TRK",
         estimated_delivery_date=now - timedelta(days=1),
-        items=[ASNLineItem(sku="SKU1", shipped_quantity=50)]
+        items=[ASNLineItem(sku=SKU("SKU1"), shipped_quantity=50)]
     )
     
     actual_receipt_date = now + timedelta(days=1) # 2 days late

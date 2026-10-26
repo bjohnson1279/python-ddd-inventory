@@ -31,7 +31,7 @@ class OTIFCalculationService:
         total_items = len(asn.items)
         
         for item in asn.items:
-            received = actual_quantities.get(item.sku, 0)
+            received = actual_quantities.get(item.sku.value if hasattr(item.sku, "value") else item.sku, 0)
             if received < item.shipped_quantity:
                 is_in_full = False
                 defect_count += 1
