@@ -1,6 +1,7 @@
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Union
 import math
+from src.domain.product.value_objects import SKU
 
 @dataclass
 class Location:
@@ -10,14 +11,22 @@ class Location:
 
 @dataclass
 class OrderLine:
-    sku: str
+    sku: Union[SKU, str]
     quantity: int
+
+    def __post_init__(self):
+        if not isinstance(self.sku, SKU):
+            object.__setattr__(self, 'sku', SKU(self.sku))
 
 @dataclass
 class StockLevel:
     location_id: str
-    sku: str
+    sku: Union[SKU, str]
     available_qty: int
+
+    def __post_init__(self):
+        if not isinstance(self.sku, SKU):
+            object.__setattr__(self, 'sku', SKU(self.sku))
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate the great circle distance in km between two points on the earth."""
@@ -37,10 +46,11 @@ class OrderRoutingEngine:
         self.locations = {loc.id: loc for loc in locations}
         self.stock_levels = stock_levels
         # O(N) indexing for O(1) lookups
-        self.stock_index = {(stock.location_id, stock.sku): stock for stock in stock_levels}
+        self.stock_index = {(stock.location_id, stock.sku if isinstance(stock.sku, SKU) else SKU(stock.sku)): stock for stock in stock_levels}
 
-    def _get_available_qty(self, location_id: str, sku: str) -> int:
-        stock = self.stock_index.get((location_id, sku))
+    def _get_available_qty(self, location_id: str, sku: Union[SKU, str]) -> int:
+        sku_obj = sku if isinstance(sku, SKU) else SKU(sku)
+        stock = self.stock_index.get((location_id, sku_obj))
         return stock.available_qty if stock else 0
 
     def _get_locations_sorted_by_distance(self, customer_lat: float, customer_lon: float) -> List[Location]:
@@ -100,7 +110,8 @@ class OrderRoutingEngine:
 
         if remaining_qty > 0:
             # In a real system, this would trigger backorders or drop-shipping workflows
-            raise ValueError(f"Insufficient stock across all locations to fulfill SKU {line.sku}")
+            sku_str = line.sku.value if hasattr(line.sku, "value") else str(line.sku)
+            raise ValueError(f"Insufficient stock across all locations to fulfill SKU {sku_str}")
 
     def route_order(self, customer_lat: float, customer_lon: float, order_lines: List[OrderLine]) -> Dict[str, List[OrderLine]]:
         """
