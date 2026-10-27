@@ -36,9 +36,20 @@ async def analyze_sku_aging(sku: str, request: Request, location_id: str, tenant
     entries = [{'quantity': movement.amount, 'occurred_at': utc(movement.occurred_at)} for movement in movements]
     layers = list(await session.scalars(select(CostLayerModel).where(CostLayerModel.tenant_id == tenant,
         CostLayerModel.stock_id == stock.id, CostLayerModel.remaining_quantity > 0)))
-    complete = sum(layer.remaining_quantity for layer in layers) == stock.quantity and all(
-        layer.remaining_value_cents is not None for layer in layers)
-    value = sum(layer.remaining_value_cents for layer in layers) if complete else None
+    # Bolt Optimization: Single-pass list aggregation to avoid multiple O(N) traversals
+    # Impact: Replaces two sum() and one all() generator comprehensions with a single pass
+    total_quantity = 0
+    total_value = 0
+    unpriced = False
+    for layer in layers:
+        total_quantity += layer.remaining_quantity
+        if layer.remaining_value_cents is None:
+            unpriced = True
+        else:
+            total_value += layer.remaining_value_cents
+
+    complete = total_quantity == stock.quantity and not unpriced
+    value = total_value if complete else None
     unit_cost = half_up(value, stock.quantity) if value is not None and stock.quantity else 0
     aging = InventoryAgingService().calculate_aging_buckets(sku, location_id, tenant,
         datetime.now(timezone.utc), entries)
