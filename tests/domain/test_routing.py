@@ -6,6 +6,8 @@ from src.domain.routing import (
     haversine_distance,
     OrderRoutingEngine,
 )
+from src.domain.product.value_objects import SKU
+from src.domain.product.exceptions import InvalidSKUError
 
 def test_haversine_distance():
     # Distance from a point to itself should be 0
@@ -50,7 +52,7 @@ def test_route_order_closest_location():
     assert "loc2" in plan
     assert "loc1" not in plan
     assert len(plan["loc2"]) == 1
-    assert plan["loc2"][0].sku == "SKU1"
+    assert plan["loc2"][0].sku == SKU("SKU1")
     assert plan["loc2"][0].quantity == 5
 
     # Check internal stock was decremented
@@ -78,11 +80,11 @@ def test_route_order_split_fulfillment():
     assert "loc1" in plan
 
     assert len(plan["loc2"]) == 1
-    assert plan["loc2"][0].sku == "SKU1"
+    assert plan["loc2"][0].sku == SKU("SKU1")
     assert plan["loc2"][0].quantity == 3 # Took all 3 from closer loc
 
     assert len(plan["loc1"]) == 1
-    assert plan["loc1"][0].sku == "SKU1"
+    assert plan["loc1"][0].sku == SKU("SKU1")
     assert plan["loc1"][0].quantity == 5 # Took remaining 5 from farther loc
 
     # Check internal stock was decremented
@@ -130,10 +132,10 @@ def test_route_order_multiple_skus():
     loc2_skus = {line.sku: line.quantity for line in plan["loc2"]}
 
     # SKU1 has to come from loc1
-    assert loc1_skus.get("SKU1") == 5
+    assert loc1_skus.get(SKU("SKU1")) == 5
     # SKU2 should come from closer loc2
-    assert loc2_skus.get("SKU2") == 5
-    assert loc1_skus.get("SKU2") is None
+    assert loc2_skus.get(SKU("SKU2")) == 5
+    assert loc1_skus.get(SKU("SKU2")) is None
 
 
 def test_route_order_exact_stock():
@@ -188,3 +190,31 @@ def test_route_order_skip_empty_locations():
 
     assert loc2_qty == 3
     assert loc3_qty == 2
+
+
+def test_order_line_and_stock_level_sku_value_object():
+    # Test constructing with SKU Value Object directly
+    sku_obj = SKU("SKU-100")
+    line = OrderLine(sku=sku_obj, quantity=5)
+    stock = StockLevel(location_id="loc1", sku=sku_obj, available_qty=10)
+
+    assert line.sku == sku_obj
+    assert stock.sku == sku_obj
+    assert isinstance(line.sku, SKU)
+    assert isinstance(stock.sku, SKU)
+
+    # Test constructing with string coersion to SKU Value Object
+    line_str = OrderLine(sku="SKU-200", quantity=2)
+    stock_str = StockLevel(location_id="loc2", sku="SKU-200", available_qty=20)
+
+    assert line_str.sku == SKU("SKU-200")
+    assert stock_str.sku == SKU("SKU-200")
+    assert isinstance(line_str.sku, SKU)
+    assert isinstance(stock_str.sku, SKU)
+
+    # Test invalid SKU raises InvalidSKUError
+    with pytest.raises(InvalidSKUError):
+        OrderLine(sku="invalid_sku!", quantity=1)
+
+    with pytest.raises(InvalidSKUError):
+        StockLevel(location_id="loc1", sku="invalid_sku!", available_qty=5)
