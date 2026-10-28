@@ -50,10 +50,22 @@ async def inventory_snapshot(session, tenant):
     on_hand, transit, problems = 0, 0, []
     for stock in stocks:
         owned = grouped.get(stock.id, [])
-        if sum(l.remaining_quantity for l in owned) != stock.quantity or any(l.remaining_value_cents is None for l in owned):
+        # Bolt Optimization: Single-pass list aggregation to avoid multiple O(N) traversals
+        # Impact: Replaces two sum() and one any() generator comprehensions with a single pass
+        qty_sum = 0
+        val_sum = 0
+        unpriced = False
+        for l in owned:
+            qty_sum += l.remaining_quantity
+            if l.remaining_value_cents is None:
+                unpriced = True
+            else:
+                val_sum += l.remaining_value_cents
+
+        if qty_sum != stock.quantity or unpriced:
             problems.append({'sku': stock.sku, 'locationId': stock.location_id, 'reason': 'Unpriced or inconsistent on-hand stock'})
         else:
-            on_hand += sum(l.remaining_value_cents for l in owned)
+            on_hand += val_sum
     for transfer in await session.scalars(select(TransferModel).where(TransferModel.tenant_id == tenant, TransferModel.status == 'DISPATCHED')):
         for item in transfer.items:
             values = [batch['costCents'] for batch in item['batches']]
