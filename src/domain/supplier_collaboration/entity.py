@@ -1,17 +1,22 @@
 from src.domain.product.value_objects import SKU
+from src.domain.supplier_collaboration.value_objects import Email
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
 import uuid
 
 @dataclass
 class Supplier:
     tenant_id: str
     name: str
-    contact_email: str
+    contact_email: Union[Email, str]
     status: str = 'ACTIVE'
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = field(default_factory=datetime.utcnow)
+
+    def __post_init__(self):
+        if isinstance(self.contact_email, str):
+            self.contact_email = Email(self.contact_email)
 
 @dataclass
 class PurchaseOrder:
