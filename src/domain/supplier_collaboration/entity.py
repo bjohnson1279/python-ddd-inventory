@@ -1,5 +1,5 @@
 from src.domain.product.value_objects import SKU
-from src.domain.supplier_collaboration.value_objects import Email
+from src.domain.supplier_collaboration.value_objects import Email, POStatus
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Union
@@ -22,22 +22,26 @@ class Supplier:
 class PurchaseOrder:
     tenant_id: str
     supplier_id: str
-    status: str = 'ISSUED' # ISSUED, ACKNOWLEDGED, SHIPPED, RECEIVED
+    status: Union[POStatus, str] = POStatus.ISSUED # ISSUED, ACKNOWLEDGED, SHIPPED, RECEIVED
     expected_delivery_date: Optional[datetime] = None
     acknowledged_date: Optional[datetime] = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     issued_at: datetime = field(default_factory=datetime.utcnow)
 
+    def __post_init__(self):
+        if isinstance(self.status, str):
+            self.status = POStatus(self.status)
+
     def acknowledge(self, acknowledged_at: Optional[datetime] = None) -> None:
-        if self.status != 'ISSUED':
-            raise ValueError(f"Cannot acknowledge purchase order in status '{self.status}'")
-        self.status = 'ACKNOWLEDGED'
+        if self.status != POStatus.ISSUED:
+            raise ValueError(f"Cannot acknowledge purchase order in status '{self.status.value if isinstance(self.status, POStatus) else self.status}'")
+        self.status = POStatus.ACKNOWLEDGED
         self.acknowledged_date = acknowledged_at or datetime.utcnow()
 
     def mark_as_shipped(self) -> None:
-        if self.status not in ('ISSUED', 'ACKNOWLEDGED'):
-            raise ValueError(f"Cannot mark purchase order as shipped from status '{self.status}'")
-        self.status = 'SHIPPED'
+        if self.status not in (POStatus.ISSUED, POStatus.ACKNOWLEDGED):
+            raise ValueError(f"Cannot mark purchase order as shipped from status '{self.status.value if isinstance(self.status, POStatus) else self.status}'")
+        self.status = POStatus.SHIPPED
 
 @dataclass
 class ASNLineItem:

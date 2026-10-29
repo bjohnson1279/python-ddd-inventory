@@ -1,5 +1,5 @@
 import pytest
-from src.domain.supplier_collaboration.value_objects import Email, InvalidEmailError
+from src.domain.supplier_collaboration.value_objects import Email, InvalidEmailError, POStatus
 from src.domain.supplier_collaboration.entity import Supplier
 
 def test_email_valid():
@@ -34,3 +34,9 @@ def test_supplier_entity_with_invalid_email():
             name="Acme Corp",
             contact_email="bademail"
         )
+
+def test_postatus_enum_values():
+    assert POStatus.ISSUED == "ISSUED"
+    assert POStatus.ACKNOWLEDGED == "ACKNOWLEDGED"
+    assert POStatus.SHIPPED == "SHIPPED"
+    assert POStatus.RECEIVED == "RECEIVED"
