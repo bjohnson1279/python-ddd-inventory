@@ -1,8 +1,15 @@
 from dataclasses import dataclass
+from enum import Enum
 import re
 
 class InvalidEmailError(ValueError):
     pass
+
+class POStatus(str, Enum):
+    ISSUED = "ISSUED"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    SHIPPED = "SHIPPED"
+    RECEIVED = "RECEIVED"
 
 @dataclass(frozen=True)
 class Email:
