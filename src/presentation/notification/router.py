@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.database import get_db_session
 from src.infrastructure.owned_feature_models import NotificationModel
 from src.infrastructure.auth.identity import current_tenant, UserModel
+from src.infrastructure.auth.rbac import requires_roles
 from src.infrastructure.report_alert_models import AlertNotice
 from src.infrastructure.financial_posting import database_now
 from src.domain.product.layer_costing import utc
@@ -29,6 +30,7 @@ def unresolved(tenant):
 
 
 @router.get('')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def inbox(request: Request, user_id: str | None = None, includeResolved: bool = False,
                 limit: int = 100, offset: int = 0, session: AsyncSession = Depends(get_db_session)):
     if not 1 <= limit <= 1000 or offset < 0:
@@ -65,6 +67,7 @@ class EscalateRequest(BaseModel):
 
 
 @router.get('/managers')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def managers(request: Request, session: AsyncSession = Depends(get_db_session)):
     rows = await session.scalars(select(UserModel).where(UserModel.tenant_id == current_tenant(request),
         UserModel.is_active.is_(True), UserModel.role.in_(['ADMIN', 'MANAGER']), UserModel.id != request.state.user_id).order_by(UserModel.name, UserModel.id))
@@ -72,6 +75,7 @@ async def managers(request: Request, session: AsyncSession = Depends(get_db_sess
 
 
 @router.get('/inbox/unread')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def get_unread_count(request: Request, user_id: str | None = None, session: AsyncSession = Depends(get_db_session)):
     owner = recipient(request, user_id)
     now = await session.run_sync(lambda sync: database_now(sync.connection()))
@@ -83,6 +87,7 @@ async def get_unread_count(request: Request, user_id: str | None = None, session
 
 
 @router.post('/{notification_id}/read')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def mark_read(notification_id: str, request: Request, user_id: str | None = None,
                     session: AsyncSession = Depends(get_db_session)):
     await locked_config(session, current_tenant(request))
@@ -93,6 +98,7 @@ async def mark_read(notification_id: str, request: Request, user_id: str | None 
 
 
 @router.post('/{notification_id}/snooze')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def snooze(notification_id: str, req_body: SnoozeRequest, request: Request, user_id: str | None = None,
                  session: AsyncSession = Depends(get_db_session)):
     await locked_config(session, current_tenant(request))
@@ -105,6 +111,7 @@ async def snooze(notification_id: str, req_body: SnoozeRequest, request: Request
 
 
 @router.post('/{notification_id}/escalate')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def escalate(notification_id: str, req_body: EscalateRequest, request: Request, user_id: str | None = None,
                    session: AsyncSession = Depends(get_db_session)):
     await locked_config(session, current_tenant(request))

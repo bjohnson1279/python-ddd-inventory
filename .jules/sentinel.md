@@ -161,3 +161,7 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** Adding standard human RBAC roles (`ADMIN`, `MANAGER`) to automated scheduler endpoints or token-based shared links breaks background processing and external sharing capabilities.
 **Learning:** Automated background jobs typically authenticate via service accounts or internal boundaries, not UI user roles. Shared link endpoints rely on token possession for access control, which is incompatible with strict user role enforcement.
 **Prevention:** Do not apply `@requires_roles` expecting human user profiles on internal automated tick endpoints or public-facing token-based sharing URLs.
+## 2026-10-10 - Fix Missing Authorization in Notification Endpoints
+**Vulnerability:** Notification endpoints in `src/presentation/notification/router.py` were missing authorization guards, allowing unauthenticated or unauthorized users to read, snooze, or escalate notifications.
+**Learning:** In FastAPI, it is critical to explicitly apply Role-Based Access Control (RBAC) decorators to all sensitive endpoints, along with adding `request: Request` in the endpoint function signature so that custom route decorators can properly extract roles from the request state.
+**Prevention:** Always verify that every new API router or endpoint dealing with sensitive operations or data explicitly implements `@requires_roles` and includes the `request: Request` parameter in its signature.
