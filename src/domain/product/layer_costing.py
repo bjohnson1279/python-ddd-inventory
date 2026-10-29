@@ -34,6 +34,18 @@ def half_up(numerator, denominator):
     return (2 * numerator + denominator) // (2 * denominator)
 
 
+def eligible_quantity(layers, method, now=None, lot_number=None):
+    now = now or datetime.now(timezone.utc)
+    total = 0
+    for layer in layers:
+        if (layer.remaining_quantity > 0
+            and not layer.quarantined
+            and (layer.expiration_date is None or utc(layer.expiration_date) > utc(now))
+            and (lot_number is None or layer.lot_number == lot_number)):
+            total += layer.remaining_quantity
+    return total
+
+
 def eligible_layers(layers, method, now=None, lot_number=None):
     now = now or datetime.now(timezone.utc)
     usable = [layer for layer in layers if layer.remaining_quantity > 0

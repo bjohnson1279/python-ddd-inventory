@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from src.application.costing_service import locked_config, load_layers
 from src.application.stock_service import StockConflict, stock_dto
 from src.application.uom_service import owned_product, convert_input, save_uom, configured
-from src.domain.product.layer_costing import consume, eligible_layers, redistribute_value, utc, validate_total_value
+from src.domain.product.layer_costing import consume, eligible_layers, eligible_quantity, redistribute_value, utc, validate_total_value
 from src.domain.uom import cost_groups
 from src.infrastructure.transfer_models import TransferModel, InventoryActionModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
@@ -188,7 +188,7 @@ class InventoryWorkflow:
                 layers = await load_layers(self.session, self.tenant, stock)
                 lookup = {layer.id: layer for layer in layers}
                 value, used = consume(layers, item['quantity'], self.config.costing_method, lot_number=item['lotNumber'])
-                if sum(l.remaining_quantity for l in eligible_layers(layers, self.config.costing_method)) < stock.allocated:
+                if eligible_quantity(layers, self.config.costing_method) < stock.allocated:
                     raise StockConflict('Transfer would consume eligible stock backing reservations')
                 for entry in used:
                     layer = lookup[entry['layerId']]

@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from src.application.costing_service import locked_config, load_layers
 from src.application.stock_service import StockConflict, stock_dto
 from src.application.quarantine_service import record_quarantine_losses
-from src.domain.product.layer_costing import consume, redistribute_value, eligible_layers, utc, validate_total_value
+from src.domain.product.layer_costing import consume, redistribute_value, eligible_layers, eligible_quantity, utc, validate_total_value
 from src.domain.return_costing import allocate_cents, returned_cents
 from src.domain.uom import cost_groups
 from src.infrastructure.return_models import ReturnModel as RMA, ReturnActionModel as Action, QuarantineModel
@@ -201,7 +201,7 @@ class ReturnService:
         layers = await load_layers(self.session, self.tenant, stock)
         cost, used = consume(layers, quantity, self.config.costing_method, lot_number=lot,
                             include_ineligible=True, layer_ids=layer_ids)
-        if sum(l.remaining_quantity for l in eligible_layers(layers, self.config.costing_method)) < stock.allocated:
+        if eligible_quantity(layers, self.config.costing_method) < stock.allocated:
             raise StockConflict('Loss would consume stock backing existing reservations')
         quarantine_changes = await record_quarantine_losses(self.session, self.tenant, used)
         return cost, used, quarantine_changes

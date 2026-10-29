@@ -4,7 +4,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
-from src.domain.product.layer_costing import CostingMethod, consume, redistribute_value, utc, eligible_layers, validate_total_value
+from src.domain.product.layer_costing import CostingMethod, consume, redistribute_value, utc, eligible_layers, eligible_quantity, validate_total_value
 from src.domain.uom import cost_groups
 
 
@@ -78,12 +78,12 @@ async def apply_costing(session, tenant, stock, operation, amount, method,
         return {'costingMethod': method.value, 'costOfGoodsSoldCents': None,
                 'costLayerId': created[0], 'costLayerIds': created,
                 'costStatus': 'PRICED' if value is not None else 'UNPRICED'}
-    if operation == 'allocate' and sum(layer.remaining_quantity for layer in eligible_layers(layers, method)) - stock.allocated < amount:
+    if operation == 'allocate' and eligible_quantity(layers, method) - stock.allocated < amount:
         raise ValueError('Insufficient eligible stock to allocate')
     if operation in ('dispatch', 'fulfill-allocation'):
         cost, consumptions = consume(layers, amount, method, lot_number=lot_number)
         remaining_allocated = stock.allocated - (amount if operation == 'fulfill-allocation' else 0)
-        if sum(layer.remaining_quantity for layer in eligible_layers(layers, method)) < remaining_allocated:
+        if eligible_quantity(layers, method) < remaining_allocated:
             raise ValueError('Dispatch would consume eligible stock backing existing reservations')
         return {'costingMethod': method.value, 'costOfGoodsSoldCents': cost,
                 'costStatus': 'PRICED' if cost is not None else 'UNPRICED', 'consumedLayers': consumptions}
