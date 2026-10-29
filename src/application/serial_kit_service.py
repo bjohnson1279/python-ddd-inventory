@@ -7,7 +7,7 @@ from src.application.tracking_service import enable_serial_tracking, require_qua
 from src.application.uom_service import owned_product
 from src.application.costing_service import load_layers
 from src.application.stock_service import StockConflict, stock_dto
-from src.domain.product.layer_costing import consume, eligible_layers, utc, validate_total_value
+from src.domain.product.layer_costing import consume, eligible_layers, eligible_quantity, utc, validate_total_value
 from src.infrastructure.serial_kit_models import SerialModel, KitModel, KitBuildModel
 from src.infrastructure.cost_models import CostLayerModel
 from src.infrastructure.stock_models import StockModel, StockMovementModel
@@ -278,7 +278,7 @@ class SerialKitWorkflow(InventoryWorkflow):
                     value, used = consume(layers, needed, self.config.costing_method)
                     if value is None:
                         raise ValueError('Price kit components before kit operations')
-                    if sum(l.remaining_quantity for l in eligible_layers(layers, self.config.costing_method)) < stock.allocated:
+                    if eligible_quantity(layers, self.config.costing_method) < stock.allocated:
                         raise StockConflict('Kit consumption would remove stock backing reservations')
                     for entry in used:
                         original = lookup[entry['layerId']]

@@ -204,3 +204,7 @@
 ## 2024-10-25 - Single-pass list aggregation for financial snapshot stock on-hand
 **Learning:** Using multiple `sum()` calls and `any()` with generator comprehensions to calculate `qty_sum`, `val_sum`, and checking if unpriced from the same list of layers creates redundant O(N) iteration overhead.
 **Action:** Combine the aggregations into a single O(N) `for` loop pass that simultaneously accumulates `qty_sum`, `val_sum`, and evaluates `unpriced` rather than making three separate O(N) passes over the layers.
+
+## 2025-01-29 - Optimize array allocations in costing
+**Learning:** O(N) list comprehensions combined with `sum()` generator expressions over large array allocations (like `eligible_layers`) cause performance regressions, especially when the allocations also sort the elements in O(N log N) time unnecessarily.
+**Action:** Instead of reusing array filter-and-sort functions like `eligible_layers` just to aggregate quantities, implement dedicated single-pass loop accumulators (like `eligible_quantity`) that avoid intermediary lists and sorting.
