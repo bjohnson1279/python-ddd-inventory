@@ -6,6 +6,7 @@ from src.infrastructure.database import get_db_session
 from src.infrastructure.auth.identity import current_tenant
 from src.infrastructure.stock_models import StockModel, StockMovementModel
 from src.infrastructure.cost_models import CostLayerModel
+from src.infrastructure.auth.rbac import requires_roles
 from src.domain.aging.services import InventoryAgingService, DeadStockRecommendationEngine
 from src.domain.product.layer_costing import utc, half_up
 
@@ -13,6 +14,7 @@ router = APIRouter(prefix='/aging', tags=['aging'])
 
 
 @router.get('/report')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'VIEWER', 'ACCOUNTANT'])
 async def aging_report(request: Request, session: AsyncSession = Depends(get_db_session)):
     from src.application.retail_reports import snapshot
     from src.infrastructure.financial_posting import database_now
@@ -21,6 +23,7 @@ async def aging_report(request: Request, session: AsyncSession = Depends(get_db_
 
 
 @router.get('/{sku}')
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'VIEWER', 'ACCOUNTANT'])
 async def analyze_sku_aging(sku: str, request: Request, location_id: str, tenant_id: str | None = None,
                              session: AsyncSession = Depends(get_db_session)):
     tenant = current_tenant(request)

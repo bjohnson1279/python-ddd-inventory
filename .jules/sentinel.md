@@ -165,3 +165,8 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** Notification endpoints in `src/presentation/notification/router.py` were missing authorization guards, allowing unauthenticated or unauthorized users to read, snooze, or escalate notifications.
 **Learning:** In FastAPI, it is critical to explicitly apply Role-Based Access Control (RBAC) decorators to all sensitive endpoints, along with adding `request: Request` in the endpoint function signature so that custom route decorators can properly extract roles from the request state.
 **Prevention:** Always verify that every new API router or endpoint dealing with sensitive operations or data explicitly implements `@requires_roles` and includes the `request: Request` parameter in its signature.
+
+## 2026-10-10 - Fix Missing Authorization in Aging API
+**Vulnerability:** The `analyze_sku_aging` endpoint in `src/presentation/aging/router.py` was missing `@requires_roles` authorization guards, allowing unauthenticated or unauthorized users to access potentially sensitive aging and esg analysis.
+**Learning:** Role extraction middleware decorators like `@requires_roles` require `request: Request` to be present in the endpoint signatures in order to properly access `request.state`. Also, these endpoint functions must be explicitly declared as `async def` to support the decorator's asynchronous execution.
+**Prevention:** Always pair `@requires_roles` decorators with `request: Request` parameters on API endpoints and ensure the function is defined as `async def` when dealing with sensitive operations or data.
