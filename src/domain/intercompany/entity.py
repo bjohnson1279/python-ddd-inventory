@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
+from typing import Union
+from src.domain.product.value_objects import SKU
 
 class TransferStatus(Enum):
     DRAFT = "DRAFT"
@@ -32,11 +34,15 @@ class IntercompanyTransfer:
     tenant_id: str
     source_entity_id: str
     destination_entity_id: str
-    sku: str
+    sku: Union[SKU, str]
     quantity: int
     transfer_price_cents: int
     status: TransferStatus
     tariffs_cents: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sku, SKU):
+            object.__setattr__(self, "sku", SKU(self.sku))
 
     def ship(self) -> None:
         if self.status != TransferStatus.DRAFT:
