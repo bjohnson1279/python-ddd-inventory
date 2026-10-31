@@ -1,6 +1,7 @@
 import pytest
-from src.domain.supplier_collaboration.value_objects import Email, InvalidEmailError, POStatus
-from src.domain.supplier_collaboration.entity import Supplier
+from datetime import datetime
+from src.domain.supplier_collaboration.value_objects import Email, InvalidEmailError, POStatus, ASNStatus
+from src.domain.supplier_collaboration.entity import Supplier, AdvanceShippingNotice
 
 def test_email_valid():
     email = Email("supplier@example.com")
@@ -40,3 +41,50 @@ def test_postatus_enum_values():
     assert POStatus.ACKNOWLEDGED == "ACKNOWLEDGED"
     assert POStatus.SHIPPED == "SHIPPED"
     assert POStatus.RECEIVED == "RECEIVED"
+
+def test_asnstatus_enum_values():
+    assert ASNStatus.SUBMITTED == "SUBMITTED"
+    assert ASNStatus.RECEIVED == "RECEIVED"
+    assert ASNStatus.DISCREPANCY == "DISCREPANCY"
+
+def test_asn_entity_with_status_string():
+    asn = AdvanceShippingNotice(
+        po_id="po-1",
+        supplier_id="sup-1",
+        tracking_number="TRK123",
+        estimated_delivery_date=datetime.now(),
+        status="RECEIVED"
+    )
+    assert isinstance(asn.status, ASNStatus)
+    assert asn.status == ASNStatus.RECEIVED
+
+def test_asn_entity_with_status_enum():
+    asn = AdvanceShippingNotice(
+        po_id="po-1",
+        supplier_id="sup-1",
+        tracking_number="TRK123",
+        estimated_delivery_date=datetime.now(),
+        status=ASNStatus.DISCREPANCY
+    )
+    assert isinstance(asn.status, ASNStatus)
+    assert asn.status == ASNStatus.DISCREPANCY
+
+def test_asn_entity_with_default_status():
+    asn = AdvanceShippingNotice(
+        po_id="po-1",
+        supplier_id="sup-1",
+        tracking_number="TRK123",
+        estimated_delivery_date=datetime.now()
+    )
+    assert isinstance(asn.status, ASNStatus)
+    assert asn.status == ASNStatus.SUBMITTED
+
+def test_asn_entity_with_invalid_status():
+    with pytest.raises(ValueError):
+        AdvanceShippingNotice(
+            po_id="po-1",
+            supplier_id="sup-1",
+            tracking_number="TRK123",
+            estimated_delivery_date=datetime.now(),
+            status="INVALID_STATUS"
+        )
