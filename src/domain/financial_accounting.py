@@ -84,7 +84,19 @@ def movement_facts(operation, amount, result, receipt_value=None):
         postings = pair('1200', '1210', result.get('inventoryValueChangeCents', receipt_value))
     elif operation == 'kit-assemble-component':
         used = result.get('consumedLayers', [])
-        value = sum(l['costCents'] for l in used) if used and all(l.get('costCents') is not None for l in used) else None
+        value = None
+        if used:
+            # Bolt Optimization: Single-pass list aggregation for financial accounting
+            # Impact: Replaces multiple generator comprehensions (sum, all) with a single O(N) pass
+            total_cost = 0
+            all_priced = True
+            for l in used:
+                if l.get('costCents') is None:
+                    all_priced = False
+                    break
+                total_cost += l['costCents']
+            if all_priced:
+                value = total_cost
         postings = pair('1220', '1200', value)
     elif operation in ('kit-assemble', 'kit-disassemble-component'):
         postings = pair('1200', '1220', result.get('carryingValueCents'))

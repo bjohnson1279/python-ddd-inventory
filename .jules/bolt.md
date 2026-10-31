@@ -208,3 +208,7 @@
 ## 2025-01-29 - Optimize array allocations in costing
 **Learning:** O(N) list comprehensions combined with `sum()` generator expressions over large array allocations (like `eligible_layers`) cause performance regressions, especially when the allocations also sort the elements in O(N log N) time unnecessarily.
 **Action:** Instead of reusing array filter-and-sort functions like `eligible_layers` just to aggregate quantities, implement dedicated single-pass loop accumulators (like `eligible_quantity`) that avoid intermediary lists and sorting.
+
+## 2024-11-01 - Single-pass list aggregation for kit assembly components
+**Learning:** In `financial_accounting.py`, calculating the value of consumed layers for kit assembly components used multiple generator comprehensions (`sum()` and `all()`) over the same list. For large component lists, this creates redundant O(N) traversals.
+**Action:** Combine the aggregations and checks into a single O(N) `for` loop pass that accumulates `total_cost` and evaluates `all_priced` simultaneously, rather than making multiple passes over the same list.
