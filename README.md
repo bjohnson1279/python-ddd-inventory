@@ -21,6 +21,7 @@ The following guides provide detailed specifications for each subsystem:
 - [Physical Counts & Reconciliation](COUNTS.md)
 - [Returns & Quarantine](RETURNS.md)
 - [Reporting & Alerts](REPORTING_ALERTS.md)
+- [Inventory Aging & Dead Stock Analysis](AGING.md)
 - [Workforce Management](WORKFORCE.md)
 - [Security & RBAC](SECURITY.md)
 
