@@ -11,6 +11,11 @@ class POStatus(str, Enum):
     SHIPPED = "SHIPPED"
     RECEIVED = "RECEIVED"
 
+class ASNStatus(str, Enum):
+    SUBMITTED = "SUBMITTED"
+    RECEIVED = "RECEIVED"
+    DISCREPANCY = "DISCREPANCY"
+
 @dataclass(frozen=True)
 class Email:
     value: str

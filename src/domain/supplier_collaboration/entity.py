@@ -1,5 +1,5 @@
 from src.domain.product.value_objects import SKU
-from src.domain.supplier_collaboration.value_objects import Email, POStatus
+from src.domain.supplier_collaboration.value_objects import Email, POStatus, ASNStatus
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Union
@@ -57,10 +57,14 @@ class AdvanceShippingNotice:
     supplier_id: str
     tracking_number: str
     estimated_delivery_date: datetime
-    status: str = 'SUBMITTED' # SUBMITTED, RECEIVED, DISCREPANCY
+    status: Union[ASNStatus, str] = ASNStatus.SUBMITTED # SUBMITTED, RECEIVED, DISCREPANCY
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     items: List[ASNLineItem] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
+
+    def __post_init__(self):
+        if isinstance(self.status, str):
+            self.status = ASNStatus(self.status)
 
 @dataclass
 class SupplierPerformance:
