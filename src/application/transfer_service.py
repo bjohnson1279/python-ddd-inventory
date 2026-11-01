@@ -203,7 +203,14 @@ class InventoryWorkflow:
             for item in items:
                 stock = await self.stock(item['sku'], location, create=True)
                 await self.receive_batches(stock, item['batches'])
-                value = None if any(b['costCents'] is None for b in item['batches']) else sum(b['costCents'] for b in item['batches'])
+                # Bolt Optimization: Single-pass list aggregation to avoid redundant O(N) traversals
+                # Impact: Replaces any() and sum() generator comprehensions with a single pass
+                value = 0
+                for b in item['batches']:
+                    if b['costCents'] is None:
+                        value = None
+                        break
+                    value += b['costCents']
                 results.append(await self.record(stock, item['quantity'], 'transfer-receive' if target == 'RECEIVED' else 'transfer-cancel', key,
                     {'transferId': row.id, 'inventoryValueChangeCents': value, 'reason': data['reason']}))
             if target == 'RECEIVED':
