@@ -1,6 +1,9 @@
 import uuid
 from datetime import datetime
-from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord
+import pytest
+from src.domain.cycle_count.entity import CycleCountPlan, CycleCountRecord, CycleCountLineItem
+from src.domain.product.value_objects import SKU
+from src.domain.product.exceptions import InvalidSKUError
 
 def test_cycle_count_plan_creation_with_defaults():
     plan1 = CycleCountPlan(
@@ -111,3 +114,44 @@ def test_cycle_count_record_creation_with_all_args():
     assert record.plan_id == plan_id
     assert record.zone == "Zone A"
     assert record.created_at == custom_time
+
+def test_cycle_count_line_item_sku_value_object():
+    # Test constructing with SKU Value Object directly
+    sku_obj = SKU("SKU-100")
+    line = CycleCountLineItem(
+        record_id="rec-1",
+        sku=sku_obj,
+        expected_quantity=10
+    )
+
+    assert line.sku == sku_obj
+    assert isinstance(line.sku, SKU)
+    assert line.expected_quantity == 10
+    assert line.status == "PENDING"
+    assert isinstance(line.id, str)
+
+    # Test constructing with string coercion to SKU Value Object
+    line_str = CycleCountLineItem(
+        record_id="rec-2",
+        sku="SKU-200",
+        expected_quantity=5
+    )
+
+    assert line_str.sku == SKU("SKU-200")
+    assert isinstance(line_str.sku, SKU)
+    assert line_str.sku.value == "SKU-200"
+
+    # Test invalid SKU raises InvalidSKUError
+    with pytest.raises(InvalidSKUError):
+        CycleCountLineItem(
+            record_id="rec-3",
+            sku="invalid_sku!",
+            expected_quantity=1
+        )
+
+    with pytest.raises(InvalidSKUError):
+        CycleCountLineItem(
+            record_id="rec-4",
+            sku="",
+            expected_quantity=1
+        )

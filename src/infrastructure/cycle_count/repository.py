@@ -136,7 +136,8 @@ class SQLAlchemyCycleCountRepository(CycleCountRepository):
                 raise ValueError('Count line belongs to another record')
         models = [
             CycleCountLineItemModel(
-                id=item.id, record_id=item.record_id, sku=item.sku,
+                id=item.id, record_id=item.record_id,
+                sku=item.sku.value if hasattr(item.sku, 'value') else str(item.sku),
                 expected_quantity=item.expected_quantity, counted_quantity=item.counted_quantity,
                 variance_quantity=item.variance_quantity, variance_value=item.variance_value,
                 status=item.status
