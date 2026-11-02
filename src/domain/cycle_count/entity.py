@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 import uuid
-from typing import Optional
+from typing import Optional, Union
+from src.domain.product.value_objects import SKU
 
 @dataclass
 class CycleCountPlan:
@@ -30,10 +31,14 @@ class CycleCountRecord:
 @dataclass
 class CycleCountLineItem:
     record_id: str
-    sku: str
+    sku: Union[SKU, str]
     expected_quantity: int
     counted_quantity: Optional[int] = None
     variance_quantity: Optional[int] = None
     variance_value: Optional[float] = None
     status: str = 'PENDING' # PENDING, MATCHED, VARIANCE_FLAGGED, RECOUNTED
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+    def __post_init__(self):
+        if not isinstance(self.sku, SKU):
+            self.sku = SKU(self.sku)
