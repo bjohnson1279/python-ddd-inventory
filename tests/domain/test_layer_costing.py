@@ -8,11 +8,11 @@ from src.domain.product.costing import FIFOCosting, LIFOCosting, WACCosting, Inv
 NOW = datetime(2026, 10, 11, tzinfo=timezone.utc)
 
 
-def layer(name, quantity, cents, received=0, expires=None, quarantined=False):
+def layer(name, quantity, cents, received=0, expires=None, quarantined=False, lot_number=None):
     return SimpleNamespace(id=name, remaining_quantity=quantity, unit_cost_cents=cents,
         remaining_value_cents=quantity * cents if cents is not None else None,
         received_at=NOW + timedelta(days=received), expiration_date=expires,
-        lot_number=name, quarantined=quarantined)
+        lot_number=lot_number if lot_number is not None else name, quarantined=quarantined)
 
 
 @pytest.mark.parametrize('method,expected', [('FIFO', 1400), ('LIFO', 2200), ('WAC', 1800)])
@@ -75,3 +75,90 @@ def test_legacy_costing_rejects_invalid_batch_cost(cost):
     for strategy in (FIFOCosting(), LIFOCosting(), WACCosting()):
         with pytest.raises(ValueError):
             strategy.calculate_cost_of_goods_sold(1, [InventoryBatch('bad', 1, cost, '2026-01-01')])
+
+
+def test_validate_total_value_boundaries():
+    from src.domain.product.layer_costing import validate_total_value, MAX_SAFE_CENTS
+    validate_total_value(0)
+    validate_total_value(MAX_SAFE_CENTS)
+    with pytest.raises(ValueError, match="exceeds the supported integer-cent limit"):
+        validate_total_value(-1)
+    with pytest.raises(ValueError, match="exceeds the supported integer-cent limit"):
+        validate_total_value(MAX_SAFE_CENTS + 1)
+
+
+def test_eligible_quantity_filtering_and_lot_matching():
+    from src.domain.product.layer_costing import eligible_quantity
+    layers = [
+        layer('active-1', 10, 100, received=-5),
+        layer('active-2', 5, 200, received=-2, lot_number='LOT-A'),
+        layer('expired', 8, 150, received=-10, expires=NOW - timedelta(days=1)),
+        layer('quarantined', 7, 120, received=-1, quarantined=True),
+        layer('depleted', 0, 100, received=-3),
+    ]
+    assert eligible_quantity(layers, 'FIFO', now=NOW) == 15
+    assert eligible_quantity(layers, 'FIFO', now=NOW, lot_number='LOT-A') == 5
+    assert eligible_quantity(layers, 'FIFO', now=NOW, lot_number='NONEXISTENT') == 0
+
+
+def test_redistribute_value_zero_quantity_and_ties():
+    empty_layers = [layer('e1', 0, 0), layer('e2', 0, 0)]
+    redistribute_value(empty_layers, 0)
+    assert [ly.remaining_value_cents for ly in empty_layers] == [0, 0]
+    with pytest.raises(ValueError, match="Cannot assign value to empty inventory"):
+        redistribute_value(empty_layers, 100)
+
+    # Test tie-breaking by layer ID when remainders are identical
+    tie_layers = [layer('b_layer', 1, 0), layer('a_layer', 1, 0)]
+    redistribute_value(tie_layers, 1)
+    assert tie_layers[0].remaining_value_cents == 0
+    assert tie_layers[1].remaining_value_cents == 1
+
+
+def test_consume_invalid_quantity_types_and_values():
+    layers = [layer('a', 10, 100)]
+    for invalid_qty in (0, -5, 2.5, True, False, "10"):
+        with pytest.raises(ValueError, match="Quantity must be a positive integer"):
+            consume(layers, invalid_qty, 'FIFO', now=NOW)
+
+
+def test_consume_with_include_ineligible_and_layer_ids():
+    layers = [
+        layer('active', 5, 100, received=-10),
+        layer('quarantined', 5, 200, received=-5, quarantined=True),
+        layer('expired', 5, 300, received=-1, expires=NOW - timedelta(days=1)),
+    ]
+    # Normal consumption cannot pick up quarantined/expired
+    with pytest.raises(ValueError, match="Insufficient eligible cost layers"):
+        consume(layers, 10, 'FIFO', now=NOW)
+
+    # With include_ineligible=True, should consume active and then quarantined
+    cost, taken = consume(layers, 10, 'FIFO', now=NOW, include_ineligible=True)
+    assert len(taken) == 2
+    assert [t['layerId'] for t in taken] == ['active', 'quarantined']
+    assert sum(t['quantity'] for t in taken) == 10
+    assert cost == 1500
+
+    # With specific layer_ids restriction
+    layers_subset = [layer('l1', 5, 100), layer('l2', 5, 200)]
+    cost_sub, taken_sub = consume(layers_subset, 3, 'FIFO', now=NOW, layer_ids=['l2'])
+    assert len(taken_sub) == 1
+    assert taken_sub[0]['layerId'] == 'l2'
+    assert cost_sub == 600
+
+
+def test_consume_fifo_with_initial_exact_value_and_unpriced():
+    l_exact = layer('exact', 10, 100)
+    l_exact.initial_quantity = 10
+    l_exact.initial_value_cents = 1000
+    cost, taken = consume([l_exact], 4, 'FIFO', now=NOW)
+    assert cost == 400
+    assert l_exact.remaining_quantity == 6
+    assert l_exact.remaining_value_cents == 600
+
+    # Test unpriced layer fully depleted
+    l_unpriced = layer('unpriced', 2, None)
+    cost_unpriced, taken_unpriced = consume([l_unpriced], 2, 'FIFO', now=NOW)
+    assert cost_unpriced is None
+    assert l_unpriced.remaining_quantity == 0
+    assert l_unpriced.remaining_value_cents == 0
