@@ -68,11 +68,22 @@ async def inventory_snapshot(session, tenant):
             on_hand += val_sum
     for transfer in await session.scalars(select(TransferModel).where(TransferModel.tenant_id == tenant, TransferModel.status == 'DISPATCHED')):
         for item in transfer.items:
-            values = [batch['costCents'] for batch in item['batches']]
-            if not values or any(v is None for v in values):
+            # Bolt Optimization: Single-pass list aggregation for transfer item batches
+            # Replaces multiple generator comprehensions (any, sum) and list allocations
+            # with a single O(N) pass, reducing iteration overhead.
+            batch_total = 0
+            has_null = False
+            for batch in item['batches']:
+                cost = batch.get('costCents')
+                if cost is None:
+                    has_null = True
+                    break
+                batch_total += cost
+
+            if not item['batches'] or has_null:
                 problems.append({'sku': item['sku'], 'reason': 'Unpriced or inconsistent transfer'})
             else:
-                transit += sum(values)
+                transit += batch_total
     for serial in await session.scalars(select(SerialModel).where(SerialModel.tenant_id == tenant, SerialModel.status == 'transferred')):
         if serial.cost_cents is None:
             problems.append({'sku': serial.sku, 'reason': 'Unpriced serial in transit'})
