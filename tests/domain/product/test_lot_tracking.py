@@ -1,6 +1,8 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 from src.domain.product.lot_tracking import Lot, LotTrackingEngine
+from src.domain.product.value_objects import SKU
+from src.domain.product.exceptions import InvalidSKUError
 
 def test_lot_initialization():
     now = datetime.now(timezone.utc)
@@ -11,7 +13,9 @@ def test_lot_initialization():
         expiration_date=now + timedelta(days=30)
     )
     assert lot.id == "lot-1"
-    assert lot.sku == "SKU-1"
+    assert isinstance(lot.sku, SKU)
+    assert lot.sku == SKU("SKU-1")
+    assert lot.sku.value == "SKU-1"
     assert lot.supplier_id == "SUP-1"
     assert lot.status == "ACTIVE"
     assert isinstance(lot.received_at, datetime)
@@ -98,3 +102,45 @@ def test_trigger_supplier_recall():
     assert engine._lots[1].status == "ACTIVE"
     assert engine._lots[2].status == "ACTIVE"
     assert engine._lots[3].status == "RECALLED"
+
+def test_lot_with_sku_value_object():
+    now = datetime.now(timezone.utc)
+    sku_obj = SKU("WIDGET-01")
+    lot = Lot(
+        id="lot-vo",
+        sku=sku_obj,
+        supplier_id="SUP-1",
+        expiration_date=now + timedelta(days=15)
+    )
+    assert lot.sku == sku_obj
+    assert lot.sku.value == "WIDGET-01"
+
+def test_lot_invalid_sku_raises():
+    now = datetime.now(timezone.utc)
+    with pytest.raises(InvalidSKUError):
+        Lot(
+            id="lot-invalid",
+            sku="invalid sku with spaces!",
+            supplier_id="SUP-1",
+            expiration_date=now + timedelta(days=15)
+        )
+
+def test_engine_operations_with_sku_instance():
+    engine = LotTrackingEngine()
+    now = datetime.now(timezone.utc)
+    sku_vo = SKU("PROD-VO")
+
+    lot1 = Lot(id="1", sku=sku_vo, supplier_id="SUP-1", expiration_date=now + timedelta(days=10))
+    lot2 = Lot(id="2", sku="PROD-VO", supplier_id="SUP-1", expiration_date=now + timedelta(days=5))
+    engine.register_lot(lot1)
+    engine.register_lot(lot2)
+
+    # Test enforce_fefo_allocation with SKU object
+    allocated = engine.enforce_fefo_allocation(sku_vo, 5)
+    assert len(allocated) == 2
+    assert allocated[0].id == "2"
+    assert allocated[1].id == "1"
+
+    # Test trigger_supplier_recall with SKU object
+    recalled = engine.trigger_supplier_recall("SUP-1", sku_vo)
+    assert len(recalled) == 2
