@@ -100,13 +100,85 @@ chosen draft before asking for another. No autonomous ordering is enabled.
 
 ## Supplier portal, client and migration
 
-The `/api/supplier-portal` uses the current user's persisted supplier binding.
-Only issued/received POs for that supplier appear; drafts and other suppliers'
-orders return no data/not-found. Acknowledgments accept aware expected delivery
-dates and `mutationId`. ASNs accept positive shipped quantities, tracking/estimated
-delivery metadata and `mutationId`; cumulative shipping cannot exceed ordered
-quantities. Neither acknowledgment nor ASN adjusts warehouse stock. Performance
-uses completed measured PO deliveries; unknown quality rates remain null.
+The `/api/supplier-portal` routes provide an external portal for authenticated suppliers bound to the `SUPPLIER_USER` role. All endpoints require the user to have an active `supplier_id` binding on their identity; requests without a supplier binding return 403 Forbidden. Supplier users can only view and interact with purchase orders explicitly assigned to their bound supplier.
+
+| Endpoint | Behavior | Roles |
+|---|---|---|
+| `GET /api/supplier-portal/pos` | List open/received purchase orders for the bound supplier | `SUPPLIER_USER` |
+| `POST /api/supplier-portal/pos/{po_id}/acknowledge` | Acknowledge a purchase order with expected delivery date and mutationId | `SUPPLIER_USER` |
+| `POST /api/supplier-portal/asns` | Submit an Advance Shipping Notice (ASN) for a purchase order | `SUPPLIER_USER` |
+| `GET /api/supplier-portal/asns` | List Advance Shipping Notices submitted by the bound supplier | `SUPPLIER_USER` |
+| `GET /api/supplier-portal/performance` | Retrieve delivery performance metrics (OTIF percentage) | `SUPPLIER_USER` |
+
+### Endpoint Specifications
+
+#### `GET /api/supplier-portal/pos`
+Lists purchase orders for the authenticated supplier that are in open (`SENT`, `ACKNOWLEDGED`, `SHIPPED`, `PARTIALLY_RECEIVED`) or `RECEIVED` status. Drafts and orders belonging to other suppliers are excluded.
+- **Headers:**
+  - `x-tenant-id` (Optional, string): Active tenant identifier (defaults to user identity context).
+- **Query Parameters:**
+  - `limit` (Optional, integer, default: 100, min: 1, max: 1000): Maximum records to return.
+  - `offset` (Optional, integer, default: 0, min: 0): Number of records to skip.
+- **Response (200 OK):**
+  - `pos` (array of objects): List of purchase orders in standard PO DTO format (`{id, poNumber, supplierId, status, items, ...}`).
+
+#### `POST /api/supplier-portal/pos/{po_id}/acknowledge`
+Allows a supplier to acknowledge an issued purchase order (`SENT` or `ACKNOWLEDGED` state) and confirm an expected delivery date. Moves the PO status to `ACKNOWLEDGED`.
+- **Path Parameters:**
+  - `po_id` (Required, string): Unique purchase order identifier.
+- **Headers:**
+  - `x-tenant-id` (Optional, string): Active tenant identifier.
+- **Request Body (JSON):**
+  - `expected_delivery_date` (Required, ISO-8601 aware datetime string): Confirmed expected delivery timestamp.
+  - `mutationId` (Required, string, min: 1, max: 100): Idempotency key for replay protection.
+- **Response (200 OK):**
+  - Returns `{"success": true, ...po_dto}` with updated status `ACKNOWLEDGED` and incremented version.
+- **Error Codes:**
+  - `400 Bad Request`: Invalid request payload.
+  - `403 Forbidden`: User lacks `SUPPLIER_USER` role or has no supplier binding.
+  - `404 Not Found`: Purchase order does not exist or belongs to another supplier.
+  - `409 Conflict`: Purchase order is not in `SENT` or `ACKNOWLEDGED` status.
+
+#### `POST /api/supplier-portal/asns`
+Submits an Advance Shipping Notice (ASN) recording dispatched quantities against an open purchase order. If the order is not already `PARTIALLY_RECEIVED`, the order status transitions to `SHIPPED`.
+- **Headers:**
+  - `x-tenant-id` (Optional, string): Active tenant identifier.
+- **Request Body (JSON):**
+  - `po_id` (Required, string): Target purchase order identifier.
+  - `tracking_number` (Required, string, min: 1, max: 200): Shipment tracking reference.
+  - `estimated_delivery_date` (Required, ISO-8601 aware datetime string): Estimated arrival timestamp.
+  - `items` (Required, array of objects, min items: 1, max items: 1000):
+    - `sku` (Required, string, min: 1, max: 100): Product SKU code (each SKU may appear at most once).
+    - `shipped_quantity` (Required, integer, min: 1, max: 2,147,483,647): Quantity shipped in base units.
+    - `lot_number` (Optional, string, min: 1, max: 100): Supplier lot/batch designation.
+  - `mutationId` (Required, string, min: 1, max: 100): Idempotency key.
+- **Response (200 OK):**
+  - `{"success": true, "asn_id": str, "status": str}`.
+- **Error Codes:**
+  - `400 Bad Request`: Duplicate SKUs or invalid payload structure.
+  - `403 Forbidden`: User unauthenticated or missing supplier binding.
+  - `404 Not Found`: Target purchase order not found for this supplier.
+  - `409 Conflict`: PO is not open for shipping, or cumulative shipped quantity exceeds ordered/outstanding quantities.
+
+#### `GET /api/supplier-portal/asns`
+Lists all Advance Shipping Notices submitted by the authenticated supplier within the tenant.
+- **Headers:**
+  - `x-tenant-id` (Optional, string): Active tenant identifier.
+- **Query Parameters:**
+  - `limit` (Optional, integer, default: 100, min: 1, max: 1000): Maximum records to return.
+- **Response (200 OK):**
+  - `asns` (array of objects): `[{"id": str, "po_id": str, "tracking_number": str, "estimated_delivery_date": str, "items": [...]}, ...]`.
+
+#### `GET /api/supplier-portal/performance`
+Computes fulfillment performance metrics for the authenticated supplier across completed (`RECEIVED`) purchase orders.
+- **Headers:**
+  - `x-tenant-id` (Optional, string): Active tenant identifier.
+- **Response (200 OK):**
+  - `performance` (object):
+    - `completed_orders` (integer): Total number of completed (`RECEIVED`) purchase orders.
+    - `measured_orders` (integer): Orders having both `expected_delivery_date` and `received_at` timestamps.
+    - `otif_percentage` (float or null): On-Time In-Full percentage (orders received on or before expected delivery date); null if `measured_orders` is 0.
+    - `defect_rate_percentage` (null): Reserved for future quality rate integration.
 
 The Python client now lists server orders without a browser ID cache and surfaces
 fetch failures. Its shared supplier-name form resolves existing owned suppliers,
