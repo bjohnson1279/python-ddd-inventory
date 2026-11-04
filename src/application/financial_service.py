@@ -227,7 +227,16 @@ class FinancialService:
         if await self.session.scalar(select(Link.source_id).where(Link.tenant_id == self.tenant, Link.source_id.in_(ids)).limit(1)):
             raise StockConflict('A stock source has already been assigned to a commercial document')
         if data['kind'] == 'PURCHASE':
-            if any(s.status == 'UNPRICED' or s.amount_cents is None for s in sources) or sum(s.amount_cents for s in sources) != data['amountCents']:
+            # Bolt Optimization: Single-pass list aggregation for purchase invoice sources
+            # Impact: Replaces any() and sum() generator comprehensions with a single pass
+            total_amount = 0
+            invalid_source = False
+            for s in sources:
+                if s.status == 'UNPRICED' or s.amount_cents is None:
+                    invalid_source = True
+                    break
+                total_amount += s.amount_cents
+            if invalid_source or total_amount != data['amountCents']:
                 raise StockConflict('Purchase invoice must match the recorded receipt liability')
             supplier = await self.owned(SupplierModel, data['supplierId']) if data.get('supplierId') else None
             if supplier is None or not supplier.is_active:
