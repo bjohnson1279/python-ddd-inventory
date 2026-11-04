@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
+from src.domain.product.value_objects import SKU
 
 class MarkdownStatus(Enum):
     PROPOSED = "PROPOSED"
@@ -9,26 +10,38 @@ class MarkdownStatus(Enum):
 
 @dataclass
 class LiquidationProfile:
-    sku: str
+    sku: Union[SKU, str]
     base_price_cents: int
     holding_cost_per_day_cents: int
     min_floor_price_cents: int
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.sku, SKU):
+            self.sku = SKU(self.sku)
+
 @dataclass
 class InventoryYieldMetrics:
-    sku: str
+    sku: Union[SKU, str]
     days_in_inventory: int
     days_until_expiration: Optional[int]
     historical_daily_demand: float
     current_stock_quantity: int
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.sku, SKU):
+            self.sku = SKU(self.sku)
+
 @dataclass
 class PriceMarkdownRecommendation:
     id: str
-    sku: str
+    sku: Union[SKU, str]
     recommended_price_cents: int
     reasoning: str
     status: MarkdownStatus = MarkdownStatus.PROPOSED
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sku, SKU):
+            self.sku = SKU(self.sku)
     
     def approve(self) -> None:
         if self.status != MarkdownStatus.PROPOSED:
