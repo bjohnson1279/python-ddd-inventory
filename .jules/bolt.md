@@ -216,3 +216,7 @@
 ## 2025-02-13 - Single-pass list aggregation for transfer item batches
 **Learning:** Using multiple generator comprehensions (like `any()` and `sum()`) to check for null values and accumulate costs over the same list of batches in transfers creates redundant O(N) traversals. In large sets of transferred items, this iteration overhead compounds unnecessarily.
 **Action:** Combine the aggregations into a single O(N) `for` loop pass that immediately breaks if a null value is found or safely accumulates the total cost, rather than making multiple passes over the batches.
+
+## 2025-02-13 - Single-pass list aggregation for purchase invoices
+**Learning:** Using multiple generator comprehensions (like `any()` and `sum()`) to check for `UNPRICED` status and accumulate amounts over the same list of stock sources in purchase invoice creation creates redundant O(N) traversals. In large sets of linked sources, this iteration overhead compounds unnecessarily.
+**Action:** Combine the aggregations into a single O(N) `for` loop pass that can short-circuit if an invalid status is found while simultaneously accumulating the total amount.
