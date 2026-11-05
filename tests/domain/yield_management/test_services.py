@@ -1,4 +1,5 @@
 import pytest
+from src.domain.product.value_objects import SKU
 from src.domain.yield_management.entity import (
     LiquidationProfile, InventoryYieldMetrics, MarkdownStatus, PriceMarkdownRecommendation
 )
@@ -177,7 +178,8 @@ def test_dynamic_pricing_engine_accrued_holding_cost_reasoning():
     )
     recommendation = engine.generate_markdown(metrics, profile)
     assert recommendation is not None
-    assert recommendation.sku == "TEST-SKU-MD-1"
+    assert recommendation.sku == SKU("TEST-SKU-MD-1")
+    assert recommendation.sku.value == "TEST-SKU-MD-1"
     assert recommendation.recommended_price_cents == 9000
     assert recommendation.reasoning == "Accrued holding costs"
     assert recommendation.status == MarkdownStatus.PROPOSED
@@ -203,7 +205,8 @@ def test_dynamic_pricing_engine_approaching_expiration_overstock_reasoning():
     )
     recommendation = engine.generate_markdown(metrics, profile)
     assert recommendation is not None
-    assert recommendation.sku == "TEST-SKU-MD-2"
+    assert recommendation.sku == SKU("TEST-SKU-MD-2")
+    assert recommendation.sku.value == "TEST-SKU-MD-2"
     assert recommendation.recommended_price_cents == 2500
     assert recommendation.reasoning == "Approaching Expiration - High Overstock"
     assert recommendation.status == MarkdownStatus.PROPOSED
