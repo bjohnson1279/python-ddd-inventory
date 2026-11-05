@@ -1,8 +1,8 @@
 import pytest
 from src.domain.yield_management.entity import (
-    LiquidationProfile, InventoryYieldMetrics
+    LiquidationProfile, InventoryYieldMetrics, MarkdownStatus, PriceMarkdownRecommendation
 )
-from src.domain.yield_management.services import YieldCalculationService
+from src.domain.yield_management.services import YieldCalculationService, DynamicPricingEngine
 
 
 def test_calculate_optimal_price_standard_holding_cost():
@@ -156,3 +156,124 @@ def test_calculate_optimal_price_zero_holding_cost():
     # 12000 - 0 = 12000
     optimal_price = calc.calculate_optimal_price(metrics, profile)
     assert optimal_price == 12000
+
+
+def test_dynamic_pricing_engine_accrued_holding_cost_reasoning():
+    """Verify DynamicPricingEngine generates markdown with 'Accrued holding costs' reasoning."""
+    calc = YieldCalculationService()
+    engine = DynamicPricingEngine(calc)
+    profile = LiquidationProfile(
+        sku="TEST-SKU-MD-1",
+        base_price_cents=10000,
+        holding_cost_per_day_cents=20,
+        min_floor_price_cents=3000
+    )
+    metrics = InventoryYieldMetrics(
+        sku="TEST-SKU-MD-1",
+        days_in_inventory=50,
+        days_until_expiration=30,
+        historical_daily_demand=5.0,
+        current_stock_quantity=100
+    )
+    recommendation = engine.generate_markdown(metrics, profile)
+    assert recommendation is not None
+    assert recommendation.sku == "TEST-SKU-MD-1"
+    assert recommendation.recommended_price_cents == 9000
+    assert recommendation.reasoning == "Accrued holding costs"
+    assert recommendation.status == MarkdownStatus.PROPOSED
+    assert len(recommendation.id) > 0
+
+
+def test_dynamic_pricing_engine_approaching_expiration_overstock_reasoning():
+    """Verify DynamicPricingEngine sets reasoning to 'Approaching Expiration - High Overstock' when hitting floor due to expiration risk."""
+    calc = YieldCalculationService()
+    engine = DynamicPricingEngine(calc)
+    profile = LiquidationProfile(
+        sku="TEST-SKU-MD-2",
+        base_price_cents=8000,
+        holding_cost_per_day_cents=5,
+        min_floor_price_cents=2500
+    )
+    metrics = InventoryYieldMetrics(
+        sku="TEST-SKU-MD-2",
+        days_in_inventory=10,
+        days_until_expiration=10,
+        historical_daily_demand=2.0,
+        current_stock_quantity=50
+    )
+    recommendation = engine.generate_markdown(metrics, profile)
+    assert recommendation is not None
+    assert recommendation.sku == "TEST-SKU-MD-2"
+    assert recommendation.recommended_price_cents == 2500
+    assert recommendation.reasoning == "Approaching Expiration - High Overstock"
+    assert recommendation.status == MarkdownStatus.PROPOSED
+
+
+def test_dynamic_pricing_engine_no_markdown_when_price_not_reduced():
+    """Verify DynamicPricingEngine returns None when optimal price is not strictly less than base price."""
+    calc = YieldCalculationService()
+    engine = DynamicPricingEngine(calc)
+    profile = LiquidationProfile(
+        sku="TEST-SKU-MD-3",
+        base_price_cents=5000,
+        holding_cost_per_day_cents=0,
+        min_floor_price_cents=1000
+    )
+    metrics = InventoryYieldMetrics(
+        sku="TEST-SKU-MD-3",
+        days_in_inventory=0,
+        days_until_expiration=60,
+        historical_daily_demand=1.0,
+        current_stock_quantity=10
+    )
+    recommendation = engine.generate_markdown(metrics, profile)
+    assert recommendation is None
+
+
+def test_price_markdown_recommendation_status_lifecycle_and_invariants():
+    """Verify valid status progression PROPOSED -> APPROVED -> PUSHED_TO_CHANNELS."""
+    rec = PriceMarkdownRecommendation(
+        id="rec-001",
+        sku="SKU-CYCLE",
+        recommended_price_cents=4500,
+        reasoning="Accrued holding costs"
+    )
+    assert rec.status == MarkdownStatus.PROPOSED
+
+    rec.approve()
+    assert rec.status == MarkdownStatus.APPROVED
+
+    rec.push_to_channels()
+    assert rec.status == MarkdownStatus.PUSHED_TO_CHANNELS
+
+
+def test_price_markdown_recommendation_invalid_transitions():
+    """Verify invalid state transitions raise ValueError with descriptive error messages."""
+    rec = PriceMarkdownRecommendation(
+        id="rec-002",
+        sku="SKU-ERR",
+        recommended_price_cents=3000,
+        reasoning="Accrued holding costs"
+    )
+
+    # Cannot push directly from PROPOSED
+    with pytest.raises(ValueError, match="Can only push APPROVED markdowns"):
+        rec.push_to_channels()
+
+    # Approve to APPROVED
+    rec.approve()
+
+    # Cannot re-approve an already APPROVED recommendation
+    with pytest.raises(ValueError, match="Can only approve PROPOSED markdowns"):
+        rec.approve()
+
+    # Push to PUSHED_TO_CHANNELS
+    rec.push_to_channels()
+
+    # Cannot push again
+    with pytest.raises(ValueError, match="Can only push APPROVED markdowns"):
+        rec.push_to_channels()
+
+    # Cannot approve after being pushed to channels
+    with pytest.raises(ValueError, match="Can only approve PROPOSED markdowns"):
+        rec.approve()
