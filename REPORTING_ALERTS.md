@@ -92,6 +92,128 @@ The Python UI shows actual aging rows and explicit data/error states, including
 incomplete report warnings. The aging preview displays its first 100 rows;
 exports support the bounded full report.
 
+### Notifications & Personal Inbox API Reference
+
+The personal inbox and notification actions are exposed under `/api/notifications` (and `/notifications`). Endpoints require authentication and allow the `ADMIN`, `MANAGER`, `USER`, and `WAREHOUSE_OPERATOR` roles. Recipients are validated against the authenticated session; specifying another user's ID yields a `403 Forbidden`.
+
+| Endpoint | Method | Roles | Description |
+| --- | --- | --- | --- |
+| `/api/notifications` | GET | `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR` | List personal notifications with pagination and resolution filters |
+| `/api/notifications/inbox/unread` | GET | `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR` | Retrieve current unread notification count |
+| `/api/notifications/managers` | GET | `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR` | List eligible tenant managers for notification escalation |
+| `/api/notifications/{notification_id}/read` | POST | `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR` | Mark an owned notification as read |
+| `/api/notifications/{notification_id}/snooze` | POST | `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR` | Temporarily snooze an owned notification for specified hours |
+| `/api/notifications/{notification_id}/escalate` | POST | `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR` | Escalate an owned notification to another tenant manager |
+
+#### `GET /api/notifications`
+Retrieves a paginated list of personal notifications for the authenticated user, ordered by creation time descending.
+
+- **Parameters:**
+  - `user_id` (Optional, query, string): Target recipient ID. Must match authenticated user if provided.
+  - `includeResolved` (Optional, query, boolean, default: `false`): Whether to include resolved alert notifications.
+  - `limit` (Optional, query, integer, default: `100`, min: `1`, max: `1000`): Maximum records to return.
+  - `offset` (Optional, query, integer, default: `0`, min: `0`): Pagination offset.
+- **Responses:**
+  - `200 OK`: Array of notification objects:
+    ```json
+    [
+      {
+        "id": "notif_123",
+        "title": "Retail notification",
+        "message": "Stock level low for SKU-001",
+        "link": "/reports/executions/rep_456/content",
+        "createdAt": "2026-10-13T12:00:00Z",
+        "status": "UNREAD",
+        "isRead": false,
+        "snoozedUntil": null
+      }
+    ]
+    ```
+  - `403 Forbidden`: Recipient ID does not match authenticated user.
+  - `422 Unprocessable Entity`: Invalid pagination bounds (`limit` < 1 or > 1000, `offset` < 0).
+- **Workflow:** Polled or queried by the client dashboard inbox to display personal action alerts and report readiness notices.
+
+#### `GET /api/notifications/inbox/unread`
+Calculates the count of currently unread notifications for the caller, taking active snooze durations into account.
+
+- **Parameters:**
+  - `user_id` (Optional, query, string): Recipient ID to inspect. Must match authenticated caller.
+- **Responses:**
+  - `200 OK`: Count payload:
+    ```json
+    {
+      "unread_count": 3
+    }
+    ```
+  - `403 Forbidden`: Recipient mismatch.
+- **Workflow:** Lightweight endpoint for badge counters and header polling without fetching full notification bodies.
+
+#### `GET /api/notifications/managers`
+Lists all active tenant administrators and managers eligible to receive escalated notifications, excluding the current user.
+
+- **Parameters:** None.
+- **Responses:**
+  - `200 OK`: Array of candidate managers:
+    ```json
+    [
+      {
+        "id": "usr_mgr1",
+        "name": "Warehouse Manager",
+        "role": "MANAGER"
+      }
+    ]
+    ```
+- **Workflow:** Populates escalation target selectors in the notification triage dialog.
+
+#### `POST /api/notifications/{notification_id}/read`
+Marks an owned notification as `READ`.
+
+- **Parameters:**
+  - `notification_id` (Required, path, string): Unique identifier of the notification.
+  - `user_id` (Optional, query, string): Recipient confirmation ID. Must match authenticated caller.
+- **Responses:**
+  - `200 OK`: `{"status": "success"}`
+  - `403 Forbidden`: Recipient mismatch.
+  - `404 Not Found`: Notification not found or owned by another user/tenant.
+- **Workflow:** Triggered when a user opens or acknowledges a notification from their inbox.
+
+#### `POST /api/notifications/{notification_id}/snooze`
+Temporarily suppresses a notification by updating its status to `SNOOZED` until the specified duration expires.
+
+- **Parameters:**
+  - `notification_id` (Required, path, string): Unique identifier of the notification.
+  - `user_id` (Optional, query, string): Recipient confirmation ID. Must match authenticated caller.
+- **Request Body (application/json):**
+  - `hours` (Required, integer, min: `1`, max: `168`): Number of hours to snooze (1 hour up to 7 days).
+- **Responses:**
+  - `200 OK`: `{"status": "success"}`
+  - `403 Forbidden`: Recipient mismatch.
+  - `404 Not Found`: Notification not found or not owned by caller.
+  - `422 Unprocessable Entity`: `hours` out of bounds or invalid payload.
+- **Workflow:** Allows operators to postpone action on an alert (e.g. pending supplier response) while hiding it from unread badges until expiration.
+
+#### `POST /api/notifications/{notification_id}/escalate`
+Forwards an owned notification to another active manager in the tenant, cloning the alert association and marking the caller's notice as `ESCALATED`.
+
+- **Parameters:**
+  - `notification_id` (Required, path, string): Unique identifier of the notification to escalate.
+  - `user_id` (Optional, query, string): Recipient confirmation ID. Must match authenticated caller.
+- **Request Body (application/json):**
+  - `target_manager_id` (Required, string): Active manager ID receiving the escalated notice.
+- **Responses:**
+  - `200 OK`:
+    ```json
+    {
+      "status": "success",
+      "escalated_notification_id": "notif_789"
+    }
+    ```
+  - `400 Bad Request`: `target_manager_id` matches the current user.
+  - `403 Forbidden`: Recipient mismatch.
+  - `404 Not Found`: Notification or target manager not found.
+  - `409 Conflict`: Notification already escalated or underlying alert already resolved.
+- **Workflow:** Enables warehouse operators and team members to transfer unresolved inventory anomalies or urgent stock warnings directly to supervisors.
+
 Email delivery, PDF/XLSX generation, public sharing, arbitrary cron/grouping and
 statutory financial reporting remain follow-up features.
 
