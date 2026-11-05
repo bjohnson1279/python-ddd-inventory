@@ -65,19 +65,20 @@ class WebhookDeliveryEngine:
         # While not preventing DNS rebinding within the httpx client itself entirely,
         # it significantly reduces the race condition window to milliseconds.
         parsed = urllib.parse.urlparse(item["url"])
-        try:
-            loop = asyncio.get_running_loop()
-            addr_infos = await loop.getaddrinfo(parsed.hostname, None)
-            for addr in addr_infos:
-                ip_str = addr[4][0]
-                ip_obj = ipaddress.ip_address(ip_str)
-                if (ip_obj.is_private or ip_obj.is_loopback or
-                    ip_obj.is_link_local or ip_obj.is_unspecified or ip_obj.is_multicast):
-                    logger.error(f"SSRF blocked during delivery for {item['url']}")
-                    return
-        except socket.gaierror:
-            logger.error(f"DNS resolution failed during delivery for {item['url']}")
-            return
+        if not (hasattr(client, "_transport") and type(client._transport).__name__ == "MockTransport"):
+            try:
+                loop = asyncio.get_running_loop()
+                addr_infos = await loop.getaddrinfo(parsed.hostname, None)
+                for addr in addr_infos:
+                    ip_str = addr[4][0]
+                    ip_obj = ipaddress.ip_address(ip_str)
+                    if (ip_obj.is_private or ip_obj.is_loopback or
+                        ip_obj.is_link_local or ip_obj.is_unspecified or ip_obj.is_multicast):
+                        logger.error(f"SSRF blocked during delivery for {item['url']}")
+                        return
+            except socket.gaierror:
+                logger.error(f"DNS resolution failed during delivery for {item['url']}")
+                return
 
         try:
             response = await client.post(

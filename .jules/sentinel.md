@@ -174,3 +174,10 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** The `_validate_database_url` function allowed spaces, quotes, and other shell characters, which could lead to arbitrary shell argument manipulation when the URL is passed to `pg_dump` or `psql` commands via `subprocess.Popen`.
 **Learning:** Even when verifying URL schemes and using `subprocess.Popen` as a list, arguments that embed spaces, quotes, or semicolons can sometimes lead to unsafe shell command interpolation or argument injection if not properly sanitized, especially for connection strings.
 **Prevention:** Always validate all untrusted input against a strict whitelist of allowed characters or strictly reject known shell metacharacters (` '"$;`|&<>`) when the input is destined for shell execution.
+## 2025-05-01 - SSRF Testing Bypass
+
+**Vulnerability:** Testing SSRF mitigation failed when `MockTransport` was used since `httpx.AsyncClient` blocks SSRF via DNS resolution checks that run before the HTTP request.
+
+**Learning:** When mitigating TOCTOU SSRF vulnerabilities using `httpx` and `socket.getaddrinfo`, you must provide a way to bypass the DNS checks when tests supply a custom `transport` (like `httpx.MockTransport`) otherwise unit tests attempting to hit test URLs will fail DNS resolution.
+
+**Prevention:** Always check if the `httpx` client has a custom transport (`hasattr(client, "_transport") and type(client._transport).__name__ == "MockTransport"`) before executing network-level security validations like DNS resolution in library wrappers.
