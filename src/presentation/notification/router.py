@@ -33,6 +33,7 @@ def unresolved(tenant):
 @requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def inbox(request: Request, user_id: str | None = None, includeResolved: bool = False,
                 limit: int = 100, offset: int = 0, session: AsyncSession = Depends(get_db_session)):
+    """Fetch paginated notifications for the authenticated user."""
     if not 1 <= limit <= 1000 or offset < 0:
         raise HTTPException(422, 'Invalid inbox page')
     owner, tenant = recipient(request, user_id), current_tenant(request)
@@ -69,6 +70,7 @@ class EscalateRequest(BaseModel):
 @router.get('/managers')
 @requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def managers(request: Request, session: AsyncSession = Depends(get_db_session)):
+    """List active tenant managers eligible as targets for notification escalation."""
     rows = await session.scalars(select(UserModel).where(UserModel.tenant_id == current_tenant(request),
         UserModel.is_active.is_(True), UserModel.role.in_(['ADMIN', 'MANAGER']), UserModel.id != request.state.user_id).order_by(UserModel.name, UserModel.id))
     return [{'id': r.id, 'name': r.name, 'role': r.role} for r in rows]
@@ -77,6 +79,7 @@ async def managers(request: Request, session: AsyncSession = Depends(get_db_sess
 @router.get('/inbox/unread')
 @requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def get_unread_count(request: Request, user_id: str | None = None, session: AsyncSession = Depends(get_db_session)):
+    """Retrieve the count of unresolved unread notifications for the recipient."""
     owner = recipient(request, user_id)
     now = await session.run_sync(lambda sync: database_now(sync.connection()))
     count = await session.scalar(select(func.count()).select_from(NotificationModel).where(
@@ -90,6 +93,7 @@ async def get_unread_count(request: Request, user_id: str | None = None, session
 @requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def mark_read(notification_id: str, request: Request, user_id: str | None = None,
                     session: AsyncSession = Depends(get_db_session)):
+    """Mark an owned notification as READ."""
     await locked_config(session, current_tenant(request))
     notification = await owned_notification(session, request, notification_id, user_id)
     notification.status = 'READ'
@@ -101,6 +105,7 @@ async def mark_read(notification_id: str, request: Request, user_id: str | None 
 @requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def snooze(notification_id: str, req_body: SnoozeRequest, request: Request, user_id: str | None = None,
                  session: AsyncSession = Depends(get_db_session)):
+    """Snooze an owned notification for a specified number of hours."""
     await locked_config(session, current_tenant(request))
     notification = await owned_notification(session, request, notification_id, user_id)
     notification.status = 'SNOOZED'
@@ -114,6 +119,7 @@ async def snooze(notification_id: str, req_body: SnoozeRequest, request: Request
 @requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def escalate(notification_id: str, req_body: EscalateRequest, request: Request, user_id: str | None = None,
                    session: AsyncSession = Depends(get_db_session)):
+    """Escalate an owned notification to another active tenant manager."""
     await locked_config(session, current_tenant(request))
     notification = await owned_notification(session, request, notification_id, user_id)
     manager = await session.scalar(select(UserModel).where(UserModel.id == req_body.target_manager_id,
