@@ -14,6 +14,8 @@ def _validate_database_url(url: str) -> str:
         raise ValueError("Database URL cannot start with a hyphen or option flag.")
     if any(c in url for c in "\n\r\x00"):
         raise ValueError("Database URL contains illegal control characters.")
+    if any(c in url for c in " '\"$;`|&<>"):
+        raise ValueError("Database URL contains illegal shell characters.")
 
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("postgresql", "postgres"):
