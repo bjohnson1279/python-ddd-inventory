@@ -92,6 +92,145 @@ The Python UI shows actual aging rows and explicit data/error states, including
 incomplete report warnings. The aging preview displays its first 100 rows;
 exports support the bounded full report.
 
+### Notification and Inbox API Specification
+
+Endpoints are available at both root `/notifications` and `/api/notifications` prefixes.
+Allowed roles for inbox and notification management: `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR`.
+
+| Endpoint | Behavior |
+|---|---|
+| `GET /notifications` | List recipient notifications with optional pagination and resolved filtering |
+| `GET /notifications/inbox/unread` | Return unread/active notification count for the recipient |
+| `GET /notifications/managers` | List active managers eligible for alert escalation |
+| `POST /notifications/{notification_id}/read` | Mark a notification as read |
+| `POST /notifications/{notification_id}/snooze` | Snooze an active notification for 1–168 hours |
+| `POST /notifications/{notification_id}/escalate` | Escalate an alert notification to an active tenant manager |
+
+#### 1. List Notifications
+- **Route:** `GET /notifications` (or `GET /api/notifications`)
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Explicit recipient ID; must match authenticated user ID.
+  - `includeResolved` (*Optional*, boolean, default: `false`): Include notices tied to resolved conditions.
+  - `limit` (*Optional*, integer, default: `100`, min: `1`, max: `1000`): Page size.
+  - `offset` (*Optional*, integer, default: `0`, min: `0`): Pagination offset.
+- **Headers:**
+  - `Authorization` (*Required*): Bearer token.
+  - `X-Tenant-ID` (*Optional*): Must match token tenant claim.
+- **Response:** `200 OK`
+```json
+[
+  {
+    "id": "notif-uuid",
+    "title": "Retail notification",
+    "message": "Stock low for SKU-100",
+    "link": "/reports/executions/job-123/content",
+    "createdAt": "2026-10-31T12:00:00+00:00",
+    "status": "UNREAD",
+    "isRead": false,
+    "snoozedUntil": null
+  }
+]
+```
+- **Errors:** `401 Unauthorized`, `403 Forbidden` (role or recipient mismatch), `422 Unprocessable Entity` (invalid limit/offset).
+
+#### 2. Get Unread Count
+- **Route:** `GET /notifications/inbox/unread` (or `GET /api/notifications/inbox/unread`)
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Recipient ID; must match authenticated user.
+- **Headers:**
+  - `Authorization` (*Required*): Bearer token.
+  - `X-Tenant-ID` (*Optional*): Tenant identifier.
+- **Response:** `200 OK`
+```json
+{
+  "unread_count": 3
+}
+```
+- **Errors:** `401 Unauthorized`, `403 Forbidden`.
+
+#### 3. List Escalation Target Managers
+- **Route:** `GET /notifications/managers` (or `GET /api/notifications/managers`)
+- **Headers:**
+  - `Authorization` (*Required*): Bearer token.
+  - `X-Tenant-ID` (*Optional*): Tenant identifier.
+- **Response:** `200 OK`
+```json
+[
+  {
+    "id": "mgr-uuid",
+    "name": "Jane Doe",
+    "role": "MANAGER"
+  }
+]
+```
+- **Errors:** `401 Unauthorized`, `403 Forbidden`.
+
+#### 4. Mark Notification Read
+- **Route:** `POST /notifications/{notification_id}/read` (or `POST /api/notifications/{notification_id}/read`)
+- **Path Parameters:**
+  - `notification_id` (*Required*, string): ID of the notification.
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Explicit recipient ID; must match authenticated user.
+- **Headers:**
+  - `Authorization` (*Required*): Bearer token.
+  - `X-Tenant-ID` (*Optional*): Tenant identifier.
+- **Response:** `200 OK`
+```json
+{
+  "status": "success"
+}
+```
+- **Errors:** `401 Unauthorized`, `403 Forbidden`, `404 Not Found`.
+
+#### 5. Snooze Notification
+- **Route:** `POST /notifications/{notification_id}/snooze` (or `POST /api/notifications/{notification_id}/snooze`)
+- **Path Parameters:**
+  - `notification_id` (*Required*, string): ID of the notification.
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Explicit recipient ID; must match authenticated user.
+- **Headers:**
+  - `Authorization` (*Required*): Bearer token.
+  - `Content-Type` (*Required*): `application/json`
+  - `X-Tenant-ID` (*Optional*): Tenant identifier.
+- **Request Body:**
+```json
+{
+  "hours": 24
+}
+```
+- **Response:** `200 OK`
+```json
+{
+  "status": "success"
+}
+```
+- **Errors:** `401 Unauthorized`, `403 Forbidden`, `404 Not Found`, `422 Unprocessable Entity` (`hours` outside 1–168).
+
+#### 6. Escalate Notification
+- **Route:** `POST /notifications/{notification_id}/escalate` (or `POST /api/notifications/{notification_id}/escalate`)
+- **Path Parameters:**
+  - `notification_id` (*Required*, string): ID of the notification.
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Explicit recipient ID; must match authenticated user.
+- **Headers:**
+  - `Authorization` (*Required*): Bearer token.
+  - `Content-Type` (*Required*): `application/json`
+  - `X-Tenant-ID` (*Optional*): Tenant identifier.
+- **Request Body:**
+```json
+{
+  "target_manager_id": "mgr-uuid"
+}
+```
+- **Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "escalated_notification_id": "new-notif-uuid"
+}
+```
+- **Errors:** `400 Bad Request` (target cannot be current user), `401 Unauthorized`, `403 Forbidden`, `404 Not Found` (notification or manager not found), `409 Conflict` (already escalated or underlying alert condition already resolved).
+
 Email delivery, PDF/XLSX generation, public sharing, arbitrary cron/grouping and
 statutory financial reporting remain follow-up features.
 
