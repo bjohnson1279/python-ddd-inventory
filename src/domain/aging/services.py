@@ -1,5 +1,6 @@
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
+from src.domain.product.value_objects import SKU
 from .entity import AgingBucket, RecommendedAction, DeadStockAnalysis
 
 class InventoryAgingService:
@@ -43,7 +44,7 @@ class InventoryAgingService:
 class DeadStockRecommendationEngine:
     def analyze(
         self,
-        sku: str,
+        sku: Union[SKU, str],
         location_id: str,
         tenant_id: str,
         current_quantity: int,
