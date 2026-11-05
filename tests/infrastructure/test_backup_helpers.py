@@ -238,6 +238,17 @@ class TestDatabaseBackupHelper:
             DatabaseBackupHelper("postgresql://user:pass@localhost/db\n-c\ncommand")
 
     @patch('src.infrastructure.backup_helpers.os.makedirs')
+    def test_database_url_validation_shell_chars(self, mock_makedirs):
+        with pytest.raises(ValueError, match="illegal shell characters"):
+            DatabaseBackupHelper("postgresql://user:pass@localhost/db\" --option=malicious")
+
+        with pytest.raises(ValueError, match="illegal shell characters"):
+            DatabaseBackupHelper("postgresql://user:pass@localhost/db; sleep 10")
+
+        with pytest.raises(ValueError, match="illegal shell characters"):
+            DatabaseBackupHelper("postgresql://user:pass@localhost/db --option=malicious")
+
+    @patch('src.infrastructure.backup_helpers.os.makedirs')
     def test_database_url_validation_empty_or_none(self, mock_makedirs):
         with pytest.raises(ValueError, match="must be a non-empty string"):
             DatabaseBackupHelper("")
