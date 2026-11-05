@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
+from typing import Union
+from src.domain.product.value_objects import SKU
 
 class AgingBucket(Enum):
     DAYS_0_30 = "0_30_DAYS"
@@ -17,7 +19,7 @@ class RecommendedAction(Enum):
 
 @dataclass
 class DeadStockAnalysis:
-    sku: str
+    sku: Union[SKU, str]
     location_id: str
     tenant_id: str
     current_quantity: int
@@ -26,3 +28,7 @@ class DeadStockAnalysis:
     aging_bucket: AgingBucket
     locked_capital_cents: int
     recommended_action: RecommendedAction
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sku, SKU):
+            self.sku = SKU(self.sku)

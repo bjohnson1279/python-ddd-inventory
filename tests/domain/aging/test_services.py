@@ -1,6 +1,7 @@
 import pytest
 from src.domain.aging.entity import AgingBucket, RecommendedAction, DeadStockAnalysis
 from src.domain.aging.services import DeadStockRecommendationEngine
+from src.domain.product.value_objects import SKU
 
 def test_dead_stock_threshold_boundary():
     engine = DeadStockRecommendationEngine()
@@ -183,7 +184,7 @@ def test_dead_stock_analysis_dataclass_fields():
     )
 
     assert isinstance(analysis, DeadStockAnalysis)
-    assert analysis.sku == "SKU-TEST"
+    assert analysis.sku == SKU("SKU-TEST")
     assert analysis.location_id == "LOC-TEST"
     assert analysis.tenant_id == "TENANT-TEST"
     assert analysis.current_quantity == 42
