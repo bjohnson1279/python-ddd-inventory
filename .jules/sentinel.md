@@ -181,3 +181,7 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Learning:** When mitigating TOCTOU SSRF vulnerabilities using `httpx` and `socket.getaddrinfo`, you must provide a way to bypass the DNS checks when tests supply a custom `transport` (like `httpx.MockTransport`) otherwise unit tests attempting to hit test URLs will fail DNS resolution.
 
 **Prevention:** Always check if the `httpx` client has a custom transport (`hasattr(client, "_transport") and type(client._transport).__name__ == "MockTransport"`) before executing network-level security validations like DNS resolution in library wrappers.
+## 2026-10-10 - Fix Path Traversal in GraphQL Schema Generation
+**Vulnerability:** The `generate_graphql_schema` function in `src/presentation/graphql.py` accepted an arbitrary `filepath` parameter without validation, leading to potential path traversal and arbitrary file writes outside the intended directory.
+**Learning:** When using user-supplied parameters to construct file paths for writing data, it's not enough to rely on defaults. If the function is ever exposed or reused, an attacker could supply inputs like `../../../etc/passwd`. Validation must be strict.
+**Prevention:** Always validate file path inputs using `os.path.basename(filepath)` and reject any input containing directory separators or traversal characters (e.g., `..`). Check against strict alphanumeric or allowlist patterns where applicable (e.g. `.isalnum()`).
