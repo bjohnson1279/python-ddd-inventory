@@ -13,6 +13,16 @@ class SKU:
         if not re.match(r'^[A-Z0-9-]+$', self.value):
             raise InvalidSKUError('SKU must contain only uppercase letters, numbers, and hyphens')
 
+    def __eq__(self, other):
+        if isinstance(other, SKU):
+            return self.value == other.value
+        if isinstance(other, str):
+            return self.value == other
+        return False
+
+    def __hash__(self):
+        return hash(self.value)
+
 @dataclass(frozen=True)
 class Money:
     amount: Decimal

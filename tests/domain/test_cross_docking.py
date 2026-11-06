@@ -1,5 +1,50 @@
 import pytest
 from src.domain.product.cross_docking import InboundASN, OutboundOrder, CrossDockingEngine
+from src.domain.product.value_objects import SKU
+from src.domain.product.exceptions import InvalidSKUError
+
+def test_inbound_asn_coerces_str_to_sku():
+    asn = InboundASN(asn_id="ASN-001", supplier_id="SUP-1", sku="SKU-123", quantity=10, destination_dock="DOCK-A")
+    assert isinstance(asn.sku, SKU)
+    assert asn.sku == SKU("SKU-123")
+    assert asn.sku.value == "SKU-123"
+
+def test_inbound_asn_accepts_sku_value_object():
+    sku_vo = SKU("SKU-123")
+    asn = InboundASN(asn_id="ASN-001", supplier_id="SUP-1", sku=sku_vo, quantity=10, destination_dock="DOCK-A")
+    assert asn.sku is sku_vo
+    assert asn.sku.value == "SKU-123"
+
+def test_inbound_asn_invalid_sku_raises():
+    with pytest.raises(InvalidSKUError):
+        InboundASN(asn_id="ASN-001", supplier_id="SUP-1", sku="invalid sku", quantity=10, destination_dock="DOCK-A")
+
+def test_outbound_order_coerces_str_to_sku():
+    order = OutboundOrder(order_id="ORD-001", sku="SKU-123", quantity=10, customer_id="CUST-1")
+    assert isinstance(order.sku, SKU)
+    assert order.sku == SKU("SKU-123")
+    assert order.sku.value == "SKU-123"
+
+def test_outbound_order_accepts_sku_value_object():
+    sku_vo = SKU("SKU-123")
+    order = OutboundOrder(order_id="ORD-001", sku=sku_vo, quantity=10, customer_id="CUST-1")
+    assert order.sku is sku_vo
+    assert order.sku.value == "SKU-123"
+
+def test_outbound_order_invalid_sku_raises():
+    with pytest.raises(InvalidSKUError):
+        OutboundOrder(order_id="ORD-001", sku="invalid sku", quantity=10, customer_id="CUST-1")
+
+def test_process_inbound_asn_with_sku_value_objects():
+    engine = CrossDockingEngine()
+    order = OutboundOrder(order_id="ORD-001", sku=SKU("SKU-123"), quantity=10, customer_id="CUST-1")
+    engine.register_outbound_order(order)
+
+    asn = InboundASN(asn_id="ASN-001", supplier_id="SUP-1", sku=SKU("SKU-123"), quantity=10, destination_dock="DOCK-A")
+    assignments = engine.process_inbound_asn(asn)
+
+    assert assignments == {"ORD-001": 10}
+    assert len(engine.pending_outbound) == 0
 
 def test_engine_initialization():
     engine = CrossDockingEngine()
