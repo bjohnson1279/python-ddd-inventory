@@ -1,20 +1,29 @@
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Union
+from src.domain.product.value_objects import SKU
 
 @dataclass
 class InboundASN:
     asn_id: str
     supplier_id: str
-    sku: str
+    sku: Union[SKU, str]
     quantity: int
     destination_dock: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sku, SKU):
+            self.sku = SKU(self.sku)
 
 @dataclass
 class OutboundOrder:
     order_id: str
-    sku: str
+    sku: Union[SKU, str]
     quantity: int
     customer_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sku, SKU):
+            self.sku = SKU(self.sku)
 
 class CrossDockingEngine:
     """Dynamic cross-docking and supplier fulfillment routing logic."""

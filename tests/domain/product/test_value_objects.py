@@ -7,6 +7,15 @@ def test_sku_creation_success():
     sku = SKU('PROD-123')
     assert sku.value == 'PROD-123'
 
+def test_sku_bidirectional_equality():
+    sku = SKU('PROD-123')
+    assert sku == SKU('PROD-123')
+    assert sku == 'PROD-123'
+    assert 'PROD-123' == sku
+    assert sku != 'OTHER-456'
+    assert sku != 123
+    assert hash(sku) == hash('PROD-123')
+
 def test_sku_creation_failure_format():
     with pytest.raises(InvalidSKUError, match='SKU must contain only uppercase letters, numbers, and hyphens'):
         SKU('invalid sku format!')
