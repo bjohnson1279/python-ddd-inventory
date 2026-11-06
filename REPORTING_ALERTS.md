@@ -217,6 +217,233 @@ Forwards an owned notification to another active manager in the tenant, cloning 
 Email delivery, PDF/XLSX generation, public sharing, arbitrary cron/grouping and
 statutory financial reporting remain follow-up features.
 
+## Notifications API Specification
+
+All notification endpoints are mounted under both root `/notifications` and `/api/notifications` prefixes. Endpoints enforce tenant isolation and require authorized RBAC roles.
+
+### Allowed Roles
+`ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR`
+
+---
+
+### 1. List Inbox Notifications
+
+Retrieves the paginated notification inbox for the authenticated user.
+
+- **Route:** `GET /notifications` (or `GET /api/notifications`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR`
+
+#### Request Parameters
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token containing user claims and tenant identity.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector (must match token tenant if provided).
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Explicit recipient ID; must match the authenticated caller's ID (`request.state.user_id`).
+  - `includeResolved` (*Optional*, boolean, default: `false`): When `true`, returns resolved alert notifications alongside active ones.
+  - `limit` (*Optional*, integer, default: `100`, range: `1`–`1000`): Maximum rows to return.
+  - `offset` (*Optional*, integer, default: `0`, min: `0`): Pagination offset.
+
+#### Response
+- **Status 200 OK**:
+```json
+[
+  {
+    "id": "notif-uuid",
+    "title": "Retail notification",
+    "message": "Low stock alert: SKU-123 on-hand quantity is below threshold",
+    "link": "/reports/executions/exec-uuid/content",
+    "createdAt": "2026-10-31T12:00:00Z",
+    "status": "UNREAD",
+    "isRead": false,
+    "snoozedUntil": null
+  }
+]
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Recipient ID does not match the authenticated caller or tenant mismatch.
+- `422 Unprocessable Entity`: Invalid pagination parameters (`limit` < 1 or > 1000, `offset` < 0).
+
+---
+
+### 2. Get Unread Notifications Count
+
+Returns the count of active unread or expired-snooze notifications for the current user.
+
+- **Route:** `GET /notifications/inbox/unread` (or `GET /api/notifications/inbox/unread`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR`
+
+#### Request Parameters
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Optional recipient ID; must match authenticated user ID.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "unread_count": 3
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Recipient mismatch or insufficient permissions.
+
+---
+
+### 3. List Eligible Escalation Managers
+
+Lists active managers and administrators in the current tenant eligible to receive escalated notifications.
+
+- **Route:** `GET /notifications/managers` (or `GET /api/notifications/managers`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR`
+
+#### Request Parameters
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+
+#### Response
+- **Status 200 OK**:
+```json
+[
+  {
+    "id": "usr-mgr-1",
+    "name": "Warehouse Manager Jane",
+    "role": "MANAGER"
+  }
+]
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient role permissions or tenant mismatch.
+
+---
+
+### 4. Mark Notification as Read
+
+Updates the status of an owned notification to `READ`.
+
+- **Route:** `POST /notifications/{notification_id}/read` (or `POST /api/notifications/{notification_id}/read`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `notification_id` (*Required*, string): ID of the notification to mark as read.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Optional recipient verification; must match caller.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "status": "success"
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Notification does not belong to the user or tenant mismatch.
+- `404 Not Found`: Notification not found.
+
+---
+
+### 5. Snooze Notification
+
+Temporarily snoozes an owned notification for a specified duration in hours (1 to 168 hours). The notification will reappear as unread after the duration expires.
+
+- **Route:** `POST /notifications/{notification_id}/snooze` (or `POST /api/notifications/{notification_id}/snooze`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `notification_id` (*Required*, string): Target notification ID.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Optional recipient verification; must match caller.
+- **Request Body (JSON):**
+```json
+{
+  "hours": 24
+}
+```
+  - `hours` (*Required*, integer, `1`–`168`): Number of hours to snooze.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "status": "success"
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Recipient or tenant mismatch.
+- `404 Not Found`: Notification not found.
+- `422 Unprocessable Entity`: Validation failure on snooze hours (`hours` outside 1–168).
+
+---
+
+### 6. Escalate Notification to Manager
+
+Escalates an un-escalated notification to a designated active manager within the same tenant. Automatically duplicates underlying active alert conditions to link with the newly notified manager.
+
+- **Route:** `POST /notifications/{notification_id}/escalate` (or `POST /api/notifications/{notification_id}/escalate`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `WAREHOUSE_OPERATOR`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `notification_id` (*Required*, string): ID of the notification to escalate.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Query Parameters:**
+  - `user_id` (*Optional*, string): Optional recipient verification; must match caller.
+- **Request Body (JSON):**
+```json
+{
+  "target_manager_id": "usr-mgr-1"
+}
+```
+  - `target_manager_id` (*Required*, string): ID of the recipient manager.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "status": "success",
+  "escalated_notification_id": "notif-escalated-uuid"
+}
+```
+
+#### Error Status Codes
+- `400 Bad Request`: Target manager is the caller themselves.
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Recipient or tenant mismatch.
+- `404 Not Found`: Notification or target manager not found.
+- `409 Conflict`: Notification is already escalated, or associated alert is already resolved.
+
+## Practical Notification Workflows
+
+### Handling Low Stock or Expiry In-App Alerts
+1. **Poll or Fetch Unread Count:** Call `GET /api/notifications/inbox/unread` to display inbox badge counts on client dashboards.
+2. **Review Active Alerts:** Call `GET /api/notifications` to fetch current notifications and their deep links (e.g., to generated reports or stock items).
+3. **Take Action:**
+   - Mark as read after reviewing via `POST /api/notifications/{notification_id}/read`.
+   - Snooze non-urgent notices during warehouse shifts via `POST /api/notifications/{notification_id}/snooze` with `{"hours": 4}`.
+   - Escalate critical notices to a supervisor using `GET /api/notifications/managers` to select an eligible recipient and `POST /api/notifications/{notification_id}/escalate` to deliver the notice.
+
 ## Verification
 
 The full Python regression run passed 539 tests with 12 optional integration
