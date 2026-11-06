@@ -44,5 +44,9 @@ graphql_app = GraphQLRouter(schema, context_getter=graphql_context)
 
 
 def generate_graphql_schema(filepath: str = 'schema.graphql'):
+    import os
+    basename = os.path.basename(filepath)
+    if not filepath or filepath != basename or '..' in filepath or not basename.replace('.', '').replace('-', '').replace('_', '').isalnum():
+        raise ValueError("Invalid configuration: filepath validation failed.")
     with open(filepath, 'w') as output:
         output.write(str(schema))
