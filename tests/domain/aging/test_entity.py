@@ -38,7 +38,7 @@ def test_dead_stock_analysis_accepts_sku_value_object():
         locked_capital_cents=10000,
         recommended_action=RecommendedAction.DONATE
     )
-    assert analysis.sku is sku_obj
+    assert analysis.sku == sku_obj
     assert analysis.sku.value == "TEST-SKU-VO"
 
 

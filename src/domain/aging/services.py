@@ -2,11 +2,13 @@ from datetime import datetime
 from typing import List, Dict, Any, Union
 from src.domain.product.value_objects import SKU
 from .entity import AgingBucket, RecommendedAction, DeadStockAnalysis
+from .value_objects import AgingSKU
+from .value_objects import AgingSKU
 
 class InventoryAgingService:
     def calculate_aging_buckets(
         self, 
-        sku: str, 
+        sku: Union[AgingSKU, SKU, str],
         location_id: str, 
         tenant_id: str,
         current_date: datetime,
@@ -44,7 +46,7 @@ class InventoryAgingService:
 class DeadStockRecommendationEngine:
     def analyze(
         self,
-        sku: Union[SKU, str],
+        sku: Union[AgingSKU, SKU, str],
         location_id: str,
         tenant_id: str,
         current_quantity: int,
@@ -77,7 +79,7 @@ class DeadStockRecommendationEngine:
         )
 
 class EsgEmissionsCalculator:
-    def calculate_scrap_emissions(self, sku: str, quantity: int, factor_per_unit_kg: float) -> float:
+    def calculate_scrap_emissions(self, sku: Union[AgingSKU, SKU, str], quantity: int, factor_per_unit_kg: float) -> float:
         """
         Returns estimated kg of CO2e generated if stock is scrapped.
         """
