@@ -233,9 +233,17 @@ async def mutate(session, request, data, operation, identifier=None):
                 if source.assigned_operator_id != profile.user_id or source.location_id != target.location_id or source.status != 'COMPLETED':
                     raise HTTPException(409, 'Count source must be completed and assigned to this operator')
                 lines = list(await session.scalars(select(Line).where(Line.record_id == source.id)))
-                if not lines or any(l.counted_quantity is None for l in lines):
+                if not lines:
                     raise HTTPException(409, 'Count has no complete observations')
-                accurate, total = sum(l.counted_quantity == l.expected_quantity for l in lines), len(lines)
+                # Bolt Optimization: Single-pass list aggregation
+                # Impact: Replaces any() and sum() generator comprehensions with a single pass
+                accurate = 0
+                total = len(lines)
+                for l in lines:
+                    if l.counted_quantity is None:
+                        raise HTTPException(409, 'Count has no complete observations')
+                    if l.counted_quantity == l.expected_quantity:
+                        accurate += 1
             if await session.scalar(select(Task.id).where(Task.tenant_id == tenant, Task.kind == data.kind, Task.source_id == data.sourceId)):
                 raise HTTPException(409, 'Activity source has already been recorded')
             row = Task(tenant_id=tenant, shift_id=target.id, kind=data.kind, source_id=source.id,
