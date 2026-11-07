@@ -1,10 +1,16 @@
 from dataclasses import dataclass
+from typing import Union
+from src.domain.product.value_objects import SKU
 
 @dataclass
 class ZPLPrintJob:
-    sku: str
+    sku: Union[SKU, str]
     lot_number: str
     printer_ip: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sku, SKU):
+            self.sku = SKU(self.sku)
 
 class ThermalPrinterEngine:
     def generate_zpl_label(self, sku: str, lot: str) -> str:
