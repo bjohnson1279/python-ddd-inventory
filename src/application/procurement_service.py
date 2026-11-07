@@ -243,18 +243,23 @@ class ProcurementService:
             for item in order.items:
                 key = (item['sku'], order.location_id)
                 incoming[key] = incoming.get(key, 0) + item['quantity'] - item['receivedQuantity']
-        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=30)
         for transfer in await self.session.scalars(select(TransferModel).where(TransferModel.tenant_id == self.tenant, TransferModel.status == 'DISPATCHED')):
             for item in transfer.items:
-                usable = sum(batch['quantity'] for batch in item['batches'] if not batch['expirationDate'] or
-                             utc(datetime.fromisoformat(batch['expirationDate'])) > datetime.now(timezone.utc))
+                # Bolt Optimization: Single-pass list aggregation and cached datetime
+                # Impact: Replaces sum() generator comprehension and repeated datetime.now() with a single loop pass
+                usable = 0
+                for batch in item['batches']:
+                    if not batch['expirationDate'] or utc(datetime.fromisoformat(batch['expirationDate'])) > now:
+                        usable += batch['quantity']
                 key = (item['sku'], transfer.destination_location_id)
                 incoming[key] = incoming.get(key, 0) + usable
         from src.infrastructure.serial_kit_models import SerialModel
         serial_transit = select(SerialModel, CostLayerModel.expiration_date).join(CostLayerModel, CostLayerModel.id == SerialModel.layer_id).where(
             SerialModel.tenant_id == self.tenant, CostLayerModel.tenant_id == self.tenant, SerialModel.status == 'transferred')
         for serial, expiry in (await self.session.execute(serial_transit)).all():
-            if expiry is None or utc(expiry) > datetime.now(timezone.utc):
+            if expiry is None or utc(expiry) > now:
                 key = (serial.sku, serial.destination_id)
                 incoming[key] = incoming.get(key, 0) + 1
         sold = {}
@@ -265,7 +270,6 @@ class ProcurementService:
             sold[key] = sold.get(key, 0) + abs(movement.amount)
         suppliers = {s.id: s for s in await self.session.scalars(select(Supplier).where(Supplier.tenant_id == self.tenant))}
         unusable = {}
-        now = datetime.now(timezone.utc)
         for layer in layers:
             if layer.quarantined or (layer.expiration_date and utc(layer.expiration_date) <= now):
                 key = (layer.sku, layer.location_id)
