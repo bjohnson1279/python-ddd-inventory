@@ -1,5 +1,7 @@
 import pytest
-from src.domain.hardware.printer import ThermalPrinterEngine
+from src.domain.hardware.printer import ThermalPrinterEngine, ZPLPrintJob
+from src.domain.product.value_objects import SKU
+from src.domain.product.exceptions import InvalidSKUError
 
 def test_generate_zpl_label():
     engine = ThermalPrinterEngine()
@@ -15,6 +17,28 @@ def test_generate_zpl_label():
     assert lot in zpl
     assert "^FO50,50^ADN,36,20^FD" + sku + "^FS" in zpl
     assert "^FO50,100^BCN,100,Y,N,N^FD" + lot + "^FS" in zpl
+
+
+def test_zpl_print_job_coerces_string_to_sku():
+    job = ZPLPrintJob(sku="TEST-SKU-1", lot_number="LOT-001", printer_ip="192.168.1.100")
+    assert isinstance(job.sku, SKU)
+    assert job.sku == SKU("TEST-SKU-1")
+    assert job.sku.value == "TEST-SKU-1"
+
+
+def test_zpl_print_job_accepts_sku_value_object():
+    sku_vo = SKU("PROD-ITEM-99")
+    job = ZPLPrintJob(sku=sku_vo, lot_number="LOT-002", printer_ip="192.168.1.101")
+    assert job.sku is sku_vo
+    assert job.sku == "PROD-ITEM-99"
+
+
+def test_zpl_print_job_invalid_sku_raises():
+    with pytest.raises(InvalidSKUError):
+        ZPLPrintJob(sku="invalid sku with spaces", lot_number="LOT-003", printer_ip="192.168.1.102")
+
+    with pytest.raises(InvalidSKUError):
+        ZPLPrintJob(sku="", lot_number="LOT-004", printer_ip="192.168.1.103")
 
 def test_generate_zpl_label_empty_strings():
     engine = ThermalPrinterEngine()
