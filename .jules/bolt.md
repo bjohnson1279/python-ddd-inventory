@@ -220,3 +220,7 @@
 ## 2025-02-13 - Single-pass list aggregation for purchase invoices
 **Learning:** Using multiple generator comprehensions (like `any()` and `sum()`) to check for `UNPRICED` status and accumulate amounts over the same list of stock sources in purchase invoice creation creates redundant O(N) traversals. In large sets of linked sources, this iteration overhead compounds unnecessarily.
 **Action:** Combine the aggregations into a single O(N) `for` loop pass that can short-circuit if an invalid status is found while simultaneously accumulating the total amount.
+
+## 2026-11-07 - Single-pass list aggregation and cached datetime
+**Learning:** Using `sum()` with a generator comprehension containing `datetime.now()` calls inside nested loops creates significant redundant overhead. It evaluates the current time repeatedly for every item during iteration.
+**Action:** Extract `datetime.now(timezone.utc)` to a single variable before the loops, and convert the generator comprehension to a single-pass `for` loop that accumulates the total, avoiding redundant system calls and generator instantiation overhead.
