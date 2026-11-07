@@ -65,6 +65,130 @@ list/read; ADMIN/MANAGER can create. The `/products` route retains its legacy
 SKU/name/decimal-price contract while `/inventory/products` supplies the shared
 client product/variant/barcode shape.
 
+## Product Catalog API Specification
+
+The `/products` endpoints provide direct CRUD access for tenant products using the domain product entities and value objects (`SKU`, `Money`).
+
+### 1. Create Product
+
+Creates a new product with an SKU, name, optional description, and decimal price amount for the authenticated tenant.
+
+- **Route:** `POST /products`
+- **Allowed Roles:** `ADMIN`, `MANAGER`
+
+#### Request Parameters
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token containing user identity and tenant claims.
+  - `X-Tenant-ID` (*Optional*, string): Tenant selector matching token's tenant claim.
+- **Request Body (application/json):**
+  - `sku` (*Required*, string): Unique alphanumeric Stock Keeping Unit (e.g., `ITEM-001`). Must be unique per tenant.
+  - `name` (*Required*, string): Product display name.
+  - `description` (*Optional*, string): Optional product description. Default is `null`.
+  - `price_amount` (*Required*, string): Decimal string representation of price amount (e.g., `"20.50"`). Must be non-negative.
+
+```json
+{
+  "sku": "PROD-1001",
+  "name": "Industrial Widget",
+  "description": "Standard heavy-duty widget",
+  "price_amount": "29.99"
+}
+```
+
+#### Response
+- **Status 201 Created**:
+```json
+{
+  "id": "prod_1a2b3c4d",
+  "sku": "PROD-1001",
+  "name": "Industrial Widget",
+  "description": "Standard heavy-duty widget",
+  "price_amount": "29.99"
+}
+```
+
+#### Error Status Codes
+- `400 Bad Request`: Invalid SKU format, negative or invalid price amount, or duplicate SKU in the tenant.
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient role permissions (requires `ADMIN` or `MANAGER`) or tenant mismatch.
+
+---
+
+### 2. Get Product by ID
+
+Retrieves an existing product by its unique product identifier.
+
+- **Route:** `GET /products/{product_id}`
+- **Required Permission:** `catalog:read`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `product_id` (*Required*, string): Unique product identifier.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Tenant identifier.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "id": "prod_1a2b3c4d",
+  "sku": "PROD-1001",
+  "name": "Industrial Widget",
+  "description": "Standard heavy-duty widget",
+  "price_amount": "29.99"
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: User lacks `catalog:read` permission or tenant mismatch.
+- `404 Not Found`: No product found matching `product_id` for the authenticated tenant.
+
+---
+
+### 3. List Products
+
+Lists products belonging to the authenticated tenant with pagination support.
+
+- **Route:** `GET /products`
+- **Required Permission:** `catalog:read`
+
+#### Request Parameters
+- **Query Parameters:**
+  - `limit` (*Optional*, integer): Maximum number of products to return (default: `100`).
+  - `offset` (*Optional*, integer): Pagination offset count (default: `0`).
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Tenant identifier.
+
+#### Response
+- **Status 200 OK**:
+```json
+[
+  {
+    "id": "prod_1a2b3c4d",
+    "sku": "PROD-1001",
+    "name": "Industrial Widget",
+    "description": "Standard heavy-duty widget",
+    "price_amount": "29.99"
+  }
+]
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: User lacks `catalog:read` permission or tenant mismatch.
+
+---
+
+### Practical Workflows
+
+#### Catalog Onboarding and Verification
+1. Authenticate as an administrator or manager (`POST /auth/login`) to obtain a JWT Bearer token.
+2. Register products via `POST /products` with an assigned SKU, name, and unit price.
+3. Query `GET /products` or `GET /products/{product_id}` with `catalog:read` permissions to inspect active products across tenant facilities.
+
 The database dependency no longer redirects models into unprovisioned tenant
 schemas or sets persistent connection-level tenant state. Explicit tenant scopes
 are implemented for the mounted APIs. `SECURITY.md` covers the later ownership
