@@ -1,15 +1,20 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import uuid
-from typing import List, Dict
+from typing import List, Dict, Union
+from src.domain.logistics.value_objects import RMAStatus
 
 @dataclass
 class RMACase:
     case_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     order_id: str = ""
     customer_id: str = ""
-    status: str = "OPEN" # OPEN, INSPECTION, REFUNDED, SCRAPPED
+    status: Union[RMAStatus, str] = RMAStatus.OPEN # OPEN, INSPECTION, REFUNDED, SCRAPPED
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def __post_init__(self):
+        if isinstance(self.status, str):
+            self.status = RMAStatus(self.status)
 
 class ReverseLogisticsWorkflow:
     def __init__(self):
@@ -23,9 +28,9 @@ class ReverseLogisticsWorkflow:
         self._rma_index[case.case_id] = case
         return case
 
-    def update_inspection_result(self, case_id: str, result: str):
+    def update_inspection_result(self, case_id: str, result: Union[RMAStatus, str]):
         # Bolt Optimization: Convert O(N) list traversal into O(1) dictionary lookup
         # Impact: Dramatically reduces lookup time when updating RMA cases in a large list
         case = self._rma_index.get(case_id)
         if case:
-            case.status = result
+            case.status = RMAStatus(result) if isinstance(result, str) else result
