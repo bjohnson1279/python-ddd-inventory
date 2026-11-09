@@ -59,8 +59,3 @@ class ReportSchedulerWorker:
                 )
         except Exception as e:
             logger.error(f"Error in ReportSchedulerWorker tick: {e}")
-    async def tick(self):
-        if self.db is None or not self.tenant_id:
-            raise ValueError('Persisted scheduler session and tenant are required')
-        from src.application.report_service import scheduler_tick
-        return await scheduler_tick(self.db, self.tenant_id)

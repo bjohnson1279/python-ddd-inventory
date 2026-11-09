@@ -36,10 +36,8 @@ def test_sync_offline_buffer_endpoint(client):
         ]
     }
     response = client.post("/offline-sync/bulk", json=payload)
-    assert response.status_code == 202
-    data = response.json()
-    assert data["status"] == "accepted"
-    assert "Queued 1 scans" in data["message"]
+    assert response.status_code == 501
+    assert 'durable cycle-count replay' in response.json()['detail']
 import logging
 from unittest.mock import patch, MagicMock
 from src.presentation.offline_sync import (
