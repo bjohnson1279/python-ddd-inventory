@@ -1,7 +1,13 @@
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
 from .exceptions import InvalidSKUError, InvalidPriceError
 import re
+
+class LotStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    QUARANTINED = "QUARANTINED"
+    RECALLED = "RECALLED"
 
 @dataclass(frozen=True)
 class SKU:

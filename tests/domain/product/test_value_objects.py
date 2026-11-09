@@ -1,6 +1,6 @@
 import pytest
 from decimal import Decimal
-from src.domain.product.value_objects import SKU, Money
+from src.domain.product.value_objects import SKU, Money, LotStatus
 from src.domain.product.exceptions import InvalidSKUError, InvalidPriceError
 
 def test_sku_creation_success():
@@ -48,3 +48,13 @@ def test_money_creation_failure_invalid_currency_length_short():
 def test_money_creation_failure_invalid_currency_length_long():
     with pytest.raises(InvalidPriceError, match='Currency must be a 3-letter ISO code'):
         Money(Decimal('10.00'), 'USDD')
+
+def test_lot_status_enum_values():
+    assert LotStatus.ACTIVE == "ACTIVE"
+    assert LotStatus.QUARANTINED == "QUARANTINED"
+    assert LotStatus.RECALLED == "RECALLED"
+    assert LotStatus("ACTIVE") == LotStatus.ACTIVE
+    assert LotStatus("QUARANTINED") == LotStatus.QUARANTINED
+    assert LotStatus("RECALLED") == LotStatus.RECALLED
+    with pytest.raises(ValueError):
+        LotStatus("INVALID")

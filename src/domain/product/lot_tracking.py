@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import List, Union
-from src.domain.product.value_objects import SKU
+from src.domain.product.value_objects import SKU, LotStatus
 
 @dataclass
 class Lot:
@@ -9,12 +9,14 @@ class Lot:
     sku: Union[SKU, str]
     supplier_id: str
     expiration_date: datetime
-    status: str = "ACTIVE" # ACTIVE, QUARANTINED, RECALLED
+    status: Union[LotStatus, str] = LotStatus.ACTIVE # ACTIVE, QUARANTINED, RECALLED
     received_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
         if not isinstance(self.sku, SKU):
             self.sku = SKU(self.sku)
+        if isinstance(self.status, str):
+            self.status = LotStatus(self.status)
 
 class LotTrackingEngine:
     """Engine for FEFO, Quarantine, and Automated Recall pipelines."""
@@ -29,7 +31,7 @@ class LotTrackingEngine:
         """First-Expired, First-Out allocation strategy."""
         sku_obj = sku if isinstance(sku, SKU) else SKU(sku)
         # Filter for active lots of the SKU and sort by expiration date
-        available_lots = [lot for lot in self._lots if lot.sku == sku_obj and lot.status == "ACTIVE"]
+        available_lots = [lot for lot in self._lots if lot.sku == sku_obj and lot.status == LotStatus.ACTIVE]
         sorted_lots = sorted(available_lots, key=lambda l: l.expiration_date)
         
         # In a full system, Lot would have available quantities. For simplicity, we just return the ordered list.
@@ -40,8 +42,8 @@ class LotTrackingEngine:
         now = datetime.now(timezone.utc)
         quarantined_count = 0
         for lot in self._lots:
-            if lot.status == "ACTIVE" and lot.expiration_date <= now:
-                lot.status = "QUARANTINED"
+            if lot.status == LotStatus.ACTIVE and lot.expiration_date <= now:
+                lot.status = LotStatus.QUARANTINED
                 quarantined_count += 1
         return quarantined_count
 
@@ -51,6 +53,6 @@ class LotTrackingEngine:
         recalled_lots = []
         for lot in self._lots:
             if lot.supplier_id == supplier_id and lot.sku == sku_obj:
-                lot.status = "RECALLED"
+                lot.status = LotStatus.RECALLED
                 recalled_lots.append(lot)
         return recalled_lots
