@@ -326,10 +326,23 @@ class ReturnService:
         stock = await self.owned(StockModel, row.stock_id)
         layers = list(await self.session.scalars(select(CostLayerModel).where(
             CostLayerModel.tenant_id == self.tenant, CostLayerModel.id.in_(row.layer_ids))))
-        if sum(l.remaining_quantity for l in layers) != row.quantity:
+
+        # Bolt Optimization: Single-pass list aggregation and cached datetime
+        # Impact: Replaces sum() and any() generator comprehensions and repeated datetime.now() with a single loop pass
+        total_qty = 0
+        has_expired = False
+        is_restock = data['resolution'] == 'RESTOCK'
+        now = datetime.now(timezone.utc) if is_restock else None
+
+        for l in layers:
+            total_qty += l.remaining_quantity
+            if is_restock and not has_expired and l.remaining_quantity and l.expiration_date and utc(l.expiration_date) <= now:
+                has_expired = True
+
+        if total_qty != row.quantity:
             raise StockConflict('Quarantine quantity changed; reconcile before resolving')
-        if data['resolution'] == 'RESTOCK':
-            if any(l.expiration_date and utc(l.expiration_date) <= datetime.now(timezone.utc) for l in layers if l.remaining_quantity):
+        if is_restock:
+            if has_expired:
                 raise StockConflict('Expired quarantine cannot be restocked')
             for layer in layers:
                 layer.quarantined = False
