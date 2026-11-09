@@ -224,3 +224,7 @@
 ## 2026-11-07 - Single-pass list aggregation and cached datetime
 **Learning:** Using `sum()` with a generator comprehension containing `datetime.now()` calls inside nested loops creates significant redundant overhead. It evaluates the current time repeatedly for every item during iteration.
 **Action:** Extract `datetime.now(timezone.utc)` to a single variable before the loops, and convert the generator comprehension to a single-pass `for` loop that accumulates the total, avoiding redundant system calls and generator instantiation overhead.
+
+## 2025-05-18 - Single-pass list aggregation and cached datetime for quarantine resolutions
+**Learning:** In `return_service.py`, checking for `sum()` of remaining quantities and `any()` expiration dates across cost layers using multiple generator comprehensions repeats O(N) traversals, and calls `datetime.now()` repeatedly within the loop for every layer, significantly increasing overhead.
+**Action:** Consolidate multiple generator comprehensions into a single O(N) `for` loop, accumulating values and evaluating conditionals simultaneously, and cache expensive `datetime.now()` calls outside of the loop.
