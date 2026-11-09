@@ -217,6 +217,478 @@ Forwards an owned notification to another active manager in the tenant, cloning 
 Email delivery, PDF/XLSX generation, public sharing, arbitrary cron/grouping and
 statutory financial reporting remain follow-up features.
 
+## Reports API Specification
+
+All report endpoints are mounted under `/reports` (and `/api/reports`). Endpoints enforce tenant isolation and require authorized RBAC roles.
+
+### Allowed Roles Summary
+- Management & Configuration (`ADMIN`, `MANAGER`, `ACCOUNTANT`): Create definitions, execute reports, manage schedules, trigger processing, and retry failed executions.
+- Viewing & Content (`ADMIN`, `MANAGER`, `USER`, `VIEWER`, `ACCOUNTANT`): List reports, list executions, view execution details, download content, and inspect schedules (filtered by user permissions).
+- Public / Background: `/reports/scheduler/tick` (internal scheduler tick) and `/reports/shared/{token}` (external share lookup).
+
+---
+
+### 1. Create Report Definition
+
+Creates a new durable report definition pinned to the caller's tenant.
+
+- **Route:** `POST /reports` (or `POST /api/reports`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Request Body (application/json):**
+  - `name` (*Required*, string, min: 1, max: 100): Report name (must contain non-whitespace characters).
+  - `description` (*Optional*, string, default: `""`, max: 2000): Detailed summary of report scope.
+  - `type` (*Optional*, string, default: `"STOCK"`): One of `STOCK`, `INVENTORY_VALUATION`, `INVENTORY_AGING`, `MOVEMENTS`, `REPLENISHMENT`, `TRIAL_BALANCE`, `INCOME_STATEMENT`, `BALANCE_SHEET`.
+  - `filters` (*Optional*, object or string, default: `{}`): Supported UTC date filters and parameters.
+  - `grouping` (*Optional*, object or string, default: `null`): Optional grouping configurations.
+  - `mutationId` (*Optional*, string, max: 100): Client-supplied idempotency key.
+  - `reason` (*Optional*, string, max: 500): Audit justification.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "success": true,
+  "report": {
+    "id": "rep_123",
+    "name": "Inventory Valuation",
+    "type": "INVENTORY_VALUATION",
+    "filters": {},
+    "tenant_id": "tenant-1",
+    "tenantId": "tenant-1",
+    "created_by": "usr_456"
+  }
+}
+```
+
+#### Error Status Codes
+- `400 Bad Request`: Invalid report type, unsupported filters, or unsafe query structure.
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient role permissions or missing domain permission.
+- `409 Conflict`: Mutation ID conflict with different parameters.
+
+---
+
+### 2. List Report Definitions
+
+Lists all report definitions accessible to the authenticated tenant user based on assigned permissions.
+
+- **Route:** `GET /reports` (or `GET /api/reports`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `VIEWER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "reports": [
+    {
+      "id": "rep_123",
+      "name": "Inventory Valuation",
+      "type": "INVENTORY_VALUATION",
+      "filters": {},
+      "tenant_id": "tenant-1",
+      "created_by": "usr_456"
+    }
+  ]
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Tenant mismatch or unauthorized caller.
+
+---
+
+### 3. Enqueue Report Execution
+
+Enqueues an asynchronous generation job for an existing report definition.
+
+- **Route:** `POST /reports/{identifier}/execute` (or `POST /api/reports/{identifier}/execute`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `identifier` (*Required*, string): ID of the report definition to execute.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Request Body (application/json):**
+  - `format` (*Optional*, string, default: `"json"`): Export format (`"json"` or `"csv"`).
+  - `mutationId` (*Optional*, string, max: 100): Idempotency key.
+  - `reason` (*Optional*, string, max: 500): Execution audit note.
+
+#### Response
+- **Status 202 Accepted**:
+```json
+{
+  "success": true,
+  "executionId": "exec_789",
+  "execution": {
+    "id": "exec_789",
+    "report_id": "rep_123",
+    "format": "json",
+    "status": "QUEUED",
+    "created_at": "2026-10-13T12:00:00Z"
+  }
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient role permissions or caller lacks permission for definition.
+- `404 Not Found`: Report definition does not exist in tenant.
+- `422 Unprocessable Entity`: Invalid format specified (e.g. PDF/XLSX).
+
+---
+
+### 4. Schedule Report Execution
+
+Creates a periodic cron schedule for automated execution of a report definition.
+
+- **Route:** `POST /reports/{identifier}/schedule` (or `POST /api/reports/{identifier}/schedule`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `identifier` (*Required*, string): ID of the target report definition.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Request Body (application/json):**
+  - `cronExpression` (*Required*, string, max: 100): Standard five-field UTC daily/weekly cron string (e.g., `"0 8 * * *"` or `"0 8 * * 1"`).
+  - `format` (*Optional*, string, default: `"json"`): Output format (`"json"` or `"csv"`).
+  - `deliveryMethod` (*Optional*, string, default: `"INTERNAL"`): Delivery destination (`"INTERNAL"`).
+  - `mutationId` (*Optional*, string, max: 100): Idempotency key.
+  - `reason` (*Optional*, string, max: 500): Scheduling note.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "success": true,
+  "schedule": {
+    "id": "sch_345",
+    "report_id": "rep_123",
+    "cron": "0 8 * * *",
+    "format": "json",
+    "active": true,
+    "next_run_at": "2026-10-14T08:00:00Z",
+    "version": 0
+  }
+}
+```
+
+#### Error Status Codes
+- `400 Bad Request`: Unsupported or invalid cron expression.
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient role permissions.
+- `404 Not Found`: Report definition not found.
+- `422 Unprocessable Entity`: Missing `cronExpression` or invalid payload format.
+
+---
+
+### 5. List Report Executions
+
+Retrieves a paginated list of report execution jobs for the tenant.
+
+- **Route:** `GET /reports/executions` (or `GET /api/reports/executions`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `VIEWER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Query Parameters:**
+  - `limit` (*Optional*, integer, default: `100`, range: `1`–`1000`): Maximum executions to return.
+  - `offset` (*Optional*, integer, default: `0`, min: `0`): Pagination offset.
+
+#### Response
+- **Status 200 OK**:
+```json
+[
+  {
+    "id": "exec_789",
+    "report_id": "rep_123",
+    "status": "COMPLETED",
+    "format": "json",
+    "fileUrl": "/reports/executions/exec_789/content",
+    "created_at": "2026-10-13T12:00:00Z"
+  }
+]
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Tenant mismatch or unauthorized caller.
+- `422 Unprocessable Entity`: Pagination bounds exceeded.
+
+---
+
+### 6. Get Report Execution Details
+
+Retrieves metadata and current status for a specific execution job.
+
+- **Route:** `GET /reports/executions/{identifier}` (or `GET /api/reports/executions/{identifier}`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `VIEWER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `identifier` (*Required*, string): Execution job identifier.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "id": "exec_789",
+  "report_id": "rep_123",
+  "status": "COMPLETED",
+  "format": "json",
+  "fileUrl": "/reports/executions/exec_789/content",
+  "created_at": "2026-10-13T12:00:00Z"
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient permission for underlying report definition.
+- `404 Not Found`: Execution job not found in tenant.
+
+---
+
+### 7. Download Report Artifact Content
+
+Streams the generated JSON payload or CSV file for a completed report execution.
+
+- **Route:** `GET /reports/executions/{identifier}/content` (or `GET /api/reports/executions/{identifier}/content`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `VIEWER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `identifier` (*Required*, string): Execution job identifier.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+
+#### Response
+- **Status 200 OK**:
+  - `Content-Type`: `application/json` or `text/csv; charset=utf-8`
+  - `Content-Disposition`: `attachment; filename="report.{format}"`
+  - `Cache-Control`: `private, no-store`
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient permission to view report type.
+- `404 Not Found`: Execution job not found.
+- `409 Conflict`: Report export is not yet completed (`status != 'COMPLETED'`).
+
+---
+
+### 8. Process Report Execution Job
+
+Processes a pending execution job directly in the request context, generating and persisting the report snapshot.
+
+- **Route:** `POST /reports/executions/{identifier}/process` (or `POST /api/reports/executions/{identifier}/process`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `identifier` (*Required*, string): Execution job identifier to process.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "id": "exec_789",
+  "status": "COMPLETED",
+  "fileUrl": "/reports/executions/exec_789/content",
+  "attempts": 1
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Caller lacks permission for underlying report definition.
+- `404 Not Found`: Execution job not found.
+
+---
+
+### 9. Retry Failed Report Execution
+
+Resets a failed execution job back to `QUEUED` status for reprocessing.
+
+- **Route:** `POST /reports/executions/{identifier}/retry` (or `POST /api/reports/executions/{identifier}/retry`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `identifier` (*Required*, string): ID of the failed execution job.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Request Body (application/json):**
+  - `expectedVersion` (*Required*, integer, ge: 0): Optimistic locking version of the execution record.
+  - `mutationId` (*Optional*, string, max: 100): Idempotency key.
+  - `reason` (*Optional*, string, max: 500): Justification for retry.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "id": "exec_789",
+  "status": "QUEUED",
+  "version": 2
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient role permissions.
+- `404 Not Found`: Execution job not found.
+- `409 Conflict`: Record version mismatch or execution job is not in `FAILED` status.
+
+---
+
+### 10. List Report Schedules
+
+Lists all active and paused report schedules in the tenant.
+
+- **Route:** `GET /reports/schedules` (or `GET /api/reports/schedules`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `USER`, `VIEWER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+
+#### Response
+- **Status 200 OK**:
+```json
+[
+  {
+    "id": "sch_345",
+    "report_id": "rep_123",
+    "cron": "0 8 * * *",
+    "format": "json",
+    "active": true,
+    "next_run_at": "2026-10-14T08:00:00Z",
+    "version": 0
+  }
+]
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient permissions or tenant mismatch.
+
+---
+
+### 11. Toggle Schedule Active State
+
+Activates or pauses an existing report schedule.
+
+- **Route:** `POST /reports/schedules/{identifier}/active` (or `POST /api/reports/schedules/{identifier}/active`)
+- **Allowed Roles:** `ADMIN`, `MANAGER`, `ACCOUNTANT`
+
+#### Request Parameters
+- **Path Parameters:**
+  - `identifier` (*Required*, string): Schedule identifier.
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+- **Request Body (application/json):**
+  - `active` (*Required*, boolean): `true` to enable schedule, `false` to pause.
+  - `expectedVersion` (*Required*, integer, ge: 0): Optimistic locking version of the schedule row.
+  - `mutationId` (*Optional*, string, max: 100): Idempotency key.
+  - `reason` (*Optional*, string, max: 500): Audit justification.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "id": "sch_345",
+  "active": false,
+  "version": 1
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+- `403 Forbidden`: Insufficient role permissions.
+- `404 Not Found`: Schedule record not found.
+- `409 Conflict`: Optimistic locking version mismatch.
+
+---
+
+### 12. Periodic Scheduler Tick
+
+Evaluates due schedules for the tenant and enqueues execution jobs. Typically invoked by an external cron worker.
+
+- **Route:** `POST /reports/scheduler/tick` (or `POST /api/reports/scheduler/tick`)
+- **Authentication:** Authenticated tenant caller.
+
+#### Request Parameters
+- **Headers:**
+  - `Authorization` (*Required*, string): Bearer token.
+  - `X-Tenant-ID` (*Optional*, string): Explicit tenant selector.
+
+#### Response
+- **Status 200 OK**:
+```json
+{
+  "executionsQueued": 1
+}
+```
+
+#### Error Status Codes
+- `401 Unauthorized`: Missing or invalid Bearer token.
+
+---
+
+### 13. Access Shared Report Token
+
+Validates an external report share token. Public report sharing is currently disabled and consistently returns 404.
+
+- **Route:** `GET /reports/shared/{token}` (or `GET /api/reports/shared/{token}`)
+
+#### Request Parameters
+- **Path Parameters:**
+  - `token` (*Required*, string): Report share token.
+
+#### Response
+- **Status 404 Not Found**:
+```json
+{
+  "detail": "Report share not found"
+}
+```
+
+---
+
+## Practical Report Workflows
+
+### Generating and Downloading an Inventory Valuation Snapshot
+1. **Create or Lookup Definition:** Call `POST /reports` with `type: "INVENTORY_VALUATION"` or fetch existing definitions via `GET /reports`.
+2. **Enqueue Execution:** Call `POST /reports/{report_id}/execute` specifying `format: "json"` or `"csv"`. Obtain the returned `executionId`.
+3. **Process Job:** The background worker picks up the job, or run manual processing via `POST /reports/executions/{executionId}/process`.
+4. **Download Artifact:** Once status is `COMPLETED`, retrieve report data via `GET /reports/executions/{executionId}/content`.
+
+---
+
 ## Notifications API Specification
 
 All notification endpoints are mounted under both root `/notifications` and `/api/notifications` prefixes. Endpoints enforce tenant isolation and require authorized RBAC roles.
