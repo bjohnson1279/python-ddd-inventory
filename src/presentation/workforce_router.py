@@ -135,6 +135,130 @@ def consecutive_limit(intervals, hours, candidate=None):
     if any((end-start).total_seconds() > hours*3600 for start, end in relevant):
         raise HTTPException(409, 'Consecutive planned shifts exceed the operator limit')
 
+async def _mutate_profile(session, tenant, identifier, target, data):
+    if not target.is_active or target.role != 'WAREHOUSE_OPERATOR':
+        raise HTTPException(409, 'Profiles require an active warehouse operator')
+    row = await session.scalar(select(Profile).where(Profile.tenant_id == tenant, Profile.user_id == identifier).execution_options(populate_existing=True))
+    if (row.version if row else 0) != data.expectedVersion:
+        raise HTTPException(409, 'Operator profile version changed')
+    if not row:
+        row = Profile(tenant_id=tenant, user_id=identifier, version=0)
+        session.add(row)
+    # Existing nonterminal assignments must remain valid.
+    shifts = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == row.id, Shift.status.in_(['PLANNED', 'ACTIVE'])))) if row.id else []
+    if any((utc(s.planned_end)-utc(s.planned_start)).total_seconds() > data.maxConsecutiveHours*3600 or not set(s.required_certifications) <= set(data.certifications) for s in shifts):
+        raise HTTPException(409, 'Profile changes invalidate an open shift')
+    history = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == row.id, Shift.status != 'CANCELLED'))) if row.id else []
+    for shift in shifts:
+        consecutive_limit([(utc(s.planned_start), utc(s.planned_end)) for s in history], data.maxConsecutiveHours,
+            (utc(shift.planned_start), utc(shift.planned_end)))
+    row.target_picks_per_hour, row.max_hours, row.certifications = data.targetPicksPerHour, data.maxConsecutiveHours, data.certifications
+    row.version += 1
+    return row
+
+async def _mutate_shift(session, tenant, data, now):
+    profile = await owned(session, Profile, tenant, data.operatorId)
+    await eligible(session, tenant, profile)
+    if data.endTime <= data.startTime or data.endTime <= now or (data.endTime-data.startTime).total_seconds() > profile.max_hours*3600:
+        raise HTTPException(400, 'Shift interval is invalid or exceeds the operator limit')
+    if not set(data.requiredCertifications) <= set(profile.certifications):
+        raise HTTPException(409, 'Operator lacks required certifications')
+    overlap = await session.scalar(select(Shift.id).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id,
+        Shift.status != 'CANCELLED', Shift.planned_start < data.endTime, Shift.planned_end > data.startTime))
+    if overlap:
+        raise HTTPException(409, 'Operator already has an overlapping shift')
+    existing = await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id, Shift.status != 'CANCELLED'))
+    consecutive_limit([(utc(s.planned_start), utc(s.planned_end)) for s in existing] + [(data.startTime, data.endTime)], profile.max_hours, (data.startTime, data.endTime))
+    row = Shift(tenant_id=tenant, operator_id=profile.id, planned_start=data.startTime, planned_end=data.endTime,
+        location_id=data.locationId, required_certifications=data.requiredCertifications, status='PLANNED', version=0)
+    session.add(row)
+    return row, profile
+
+async def _mutate_transition(session, tenant, operation, target, profile, data, now):
+    row = target
+    if row.version != data.expectedVersion:
+        raise HTTPException(409, 'Shift version changed')
+    required = 'PLANNED' if operation in ('start', 'cancel') else 'ACTIVE'
+    if row.status != required:
+        raise HTTPException(409, 'Invalid shift transition')
+    if operation == 'start':
+        if not utc(row.planned_start) <= now < utc(row.planned_end):
+            raise HTTPException(409, 'Shift can only start within its planned interval')
+        if not set(row.required_certifications) <= set(profile.certifications):
+            raise HTTPException(409, 'Operator lacks required certifications')
+        if await session.scalar(select(Shift.id).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id, Shift.status == 'ACTIVE')):
+            raise HTTPException(409, 'Operator already has an active shift')
+        row.status, row.started_at = 'ACTIVE', now
+    elif operation == 'complete':
+        row.status, row.ended_at = 'COMPLETED', now
+    else:
+        row.status = 'CANCELLED'
+    row.version += 1
+    return row
+
+async def _mutate_task(session, tenant, target, profile, data, now):
+    if target.status != 'ACTIVE':
+        raise HTTPException(409, 'Activities require an active shift')
+    if data.durationSeconds > profile.max_hours*3600:
+        raise HTTPException(400, 'Reported activity duration exceeds the operator limit')
+    recorded_seconds = await session.scalar(select(func.coalesce(func.sum(Task.duration_seconds), 0)).where(Task.tenant_id == tenant, Task.shift_id == target.id))
+    if recorded_seconds + data.durationSeconds > (utc(target.planned_end)-utc(target.planned_start)).total_seconds():
+        raise HTTPException(409, 'Reported activities exceed the planned shift duration')
+    accurate, total = 0, 0
+    if data.kind == 'PICK':
+        source = await owned(session, Movement, tenant, data.sourceId)
+        if source.actor_id != profile.user_id or source.location_id != target.location_id or source.operation not in ('dispatch', 'fulfill-allocation', 'serial-sell', 'kit-sale-component') or utc(source.occurred_at) < utc(target.started_at):
+            raise HTTPException(409, 'Pick source does not belong to this operator shift')
+    else:
+        source = await owned(session, Count, tenant, data.sourceId)
+        if source.assigned_operator_id != profile.user_id or source.location_id != target.location_id or source.status != 'COMPLETED':
+            raise HTTPException(409, 'Count source must be completed and assigned to this operator')
+        lines = list(await session.scalars(select(Line).where(Line.record_id == source.id)))
+        if not lines:
+            raise HTTPException(409, 'Count has no complete observations')
+        # Bolt Optimization: Single-pass list aggregation
+        # Impact: Replaces any() and sum() generator comprehensions with a single pass
+        accurate = 0
+        total = len(lines)
+        for l in lines:
+            if l.counted_quantity is None:
+                raise HTTPException(409, 'Count has no complete observations')
+            if l.counted_quantity == l.expected_quantity:
+                accurate += 1
+    if await session.scalar(select(Task.id).where(Task.tenant_id == tenant, Task.kind == data.kind, Task.source_id == data.sourceId)):
+        raise HTTPException(409, 'Activity source has already been recorded')
+    row = Task(tenant_id=tenant, shift_id=target.id, kind=data.kind, source_id=source.id,
+        movement_id=source.id if data.kind == 'PICK' else None, count_id=source.id if data.kind == 'COUNT' else None,
+        duration_seconds=data.durationSeconds, distance_meters=data.traversalDistanceMeters,
+        accurate_lines=accurate, total_lines=total, created_at=now)
+    session.add(row)
+    return row
+
+async def _mutate_plan(session, tenant, data, now):
+    if data.targetDate < now.date():
+        raise HTTPException(400, 'Staffing plans require a current or future date')
+    recommendation = PredictiveSchedulingEngine().generate_staffing_recommendation(data.targetDate,
+        data.projectedInboundVolume, data.projectedOutboundVolume, data.averageOperatorTargetPicks, data.shiftDurationHours)
+    inputs = data.model_dump(mode='json', exclude={'mutationId', 'reason', 'tenantId', 'targetDate'})
+    available = await capacity(session, tenant, inputs)
+    row = Plan(tenant_id=tenant, target_date=data.targetDate.isoformat(), inputs=inputs,
+        recommendation={'recommendedHeadcount': recommendation.recommended_headcount, 'eligibleOperatorCount': available,
+            'shortfall': max(0, recommendation.recommended_headcount-available), 'method': 'EXPLICIT_VOLUME_HEURISTIC'}, status='DRAFT', version=0)
+    session.add(row)
+    return row
+
+async def _mutate_publish(session, tenant, target, data, now):
+    row = target
+    if row.version != data.expectedVersion or row.status != 'DRAFT':
+        raise HTTPException(409, 'Staffing plan is no longer this draft version')
+    if date.fromisoformat(row.target_date) < now.date():
+        raise HTTPException(409, 'Staffing date has passed')
+    available = await capacity(session, tenant, row.inputs)
+    row.recommendation = {**row.recommendation, 'eligibleOperatorCount': available,
+        'shortfall': max(0, row.recommendation['recommendedHeadcount']-available)}
+    row.status, row.version = 'PUBLISHED', row.version + 1
+    return row
+
 async def mutate(session, request, data, operation, identifier=None):
     tenant, actor = current_tenant(request), request.state.user_id
     fingerprint = {'operation': operation, 'id': identifier, **data.model_dump(mode='json')}
@@ -161,117 +285,17 @@ async def mutate(session, request, data, operation, identifier=None):
             return result
         now = await session.run_sync(lambda sync: database_now(sync.connection()))
         if operation == 'profile':
-            if not target.is_active or target.role != 'WAREHOUSE_OPERATOR':
-                raise HTTPException(409, 'Profiles require an active warehouse operator')
-            row = await session.scalar(select(Profile).where(Profile.tenant_id == tenant, Profile.user_id == identifier).execution_options(populate_existing=True))
-            if (row.version if row else 0) != data.expectedVersion:
-                raise HTTPException(409, 'Operator profile version changed')
-            if not row:
-                row = Profile(tenant_id=tenant, user_id=identifier, version=0)
-                session.add(row)
-            # Existing nonterminal assignments must remain valid.
-            shifts = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == row.id, Shift.status.in_(['PLANNED', 'ACTIVE'])))) if row.id else []
-            if any((utc(s.planned_end)-utc(s.planned_start)).total_seconds() > data.maxConsecutiveHours*3600 or not set(s.required_certifications) <= set(data.certifications) for s in shifts):
-                raise HTTPException(409, 'Profile changes invalidate an open shift')
-            history = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == row.id, Shift.status != 'CANCELLED'))) if row.id else []
-            for shift in shifts:
-                consecutive_limit([(utc(s.planned_start), utc(s.planned_end)) for s in history], data.maxConsecutiveHours,
-                    (utc(shift.planned_start), utc(shift.planned_end)))
-            row.target_picks_per_hour, row.max_hours, row.certifications = data.targetPicksPerHour, data.maxConsecutiveHours, data.certifications
-            row.version += 1
+            row = await _mutate_profile(session, tenant, identifier, target, data)
         elif operation == 'shift':
-            profile = await owned(session, Profile, tenant, data.operatorId)
-            await eligible(session, tenant, profile)
-            if data.endTime <= data.startTime or data.endTime <= now or (data.endTime-data.startTime).total_seconds() > profile.max_hours*3600:
-                raise HTTPException(400, 'Shift interval is invalid or exceeds the operator limit')
-            if not set(data.requiredCertifications) <= set(profile.certifications):
-                raise HTTPException(409, 'Operator lacks required certifications')
-            overlap = await session.scalar(select(Shift.id).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id,
-                Shift.status != 'CANCELLED', Shift.planned_start < data.endTime, Shift.planned_end > data.startTime))
-            if overlap:
-                raise HTTPException(409, 'Operator already has an overlapping shift')
-            existing = await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id, Shift.status != 'CANCELLED'))
-            consecutive_limit([(utc(s.planned_start), utc(s.planned_end)) for s in existing] + [(data.startTime, data.endTime)], profile.max_hours, (data.startTime, data.endTime))
-            row = Shift(tenant_id=tenant, operator_id=profile.id, planned_start=data.startTime, planned_end=data.endTime,
-                location_id=data.locationId, required_certifications=data.requiredCertifications, status='PLANNED', version=0)
-            session.add(row)
+            row, profile = await _mutate_shift(session, tenant, data, now)
         elif operation in ('start', 'complete', 'cancel'):
-            row = target
-            if row.version != data.expectedVersion:
-                raise HTTPException(409, 'Shift version changed')
-            required = 'PLANNED' if operation in ('start', 'cancel') else 'ACTIVE'
-            if row.status != required:
-                raise HTTPException(409, 'Invalid shift transition')
-            if operation == 'start':
-                if not utc(row.planned_start) <= now < utc(row.planned_end):
-                    raise HTTPException(409, 'Shift can only start within its planned interval')
-                if not set(row.required_certifications) <= set(profile.certifications):
-                    raise HTTPException(409, 'Operator lacks required certifications')
-                if await session.scalar(select(Shift.id).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id, Shift.status == 'ACTIVE')):
-                    raise HTTPException(409, 'Operator already has an active shift')
-                row.status, row.started_at = 'ACTIVE', now
-            elif operation == 'complete':
-                row.status, row.ended_at = 'COMPLETED', now
-            else:
-                row.status = 'CANCELLED'
-            row.version += 1
+            row = await _mutate_transition(session, tenant, operation, target, profile, data, now)
         elif operation == 'task':
-            if target.status != 'ACTIVE':
-                raise HTTPException(409, 'Activities require an active shift')
-            if data.durationSeconds > profile.max_hours*3600:
-                raise HTTPException(400, 'Reported activity duration exceeds the operator limit')
-            recorded_seconds = await session.scalar(select(func.coalesce(func.sum(Task.duration_seconds), 0)).where(Task.tenant_id == tenant, Task.shift_id == target.id))
-            if recorded_seconds + data.durationSeconds > (utc(target.planned_end)-utc(target.planned_start)).total_seconds():
-                raise HTTPException(409, 'Reported activities exceed the planned shift duration')
-            accurate, total = 0, 0
-            if data.kind == 'PICK':
-                source = await owned(session, Movement, tenant, data.sourceId)
-                if source.actor_id != profile.user_id or source.location_id != target.location_id or source.operation not in ('dispatch', 'fulfill-allocation', 'serial-sell', 'kit-sale-component') or utc(source.occurred_at) < utc(target.started_at):
-                    raise HTTPException(409, 'Pick source does not belong to this operator shift')
-            else:
-                source = await owned(session, Count, tenant, data.sourceId)
-                if source.assigned_operator_id != profile.user_id or source.location_id != target.location_id or source.status != 'COMPLETED':
-                    raise HTTPException(409, 'Count source must be completed and assigned to this operator')
-                lines = list(await session.scalars(select(Line).where(Line.record_id == source.id)))
-                if not lines:
-                    raise HTTPException(409, 'Count has no complete observations')
-                # Bolt Optimization: Single-pass list aggregation
-                # Impact: Replaces any() and sum() generator comprehensions with a single pass
-                accurate = 0
-                total = len(lines)
-                for l in lines:
-                    if l.counted_quantity is None:
-                        raise HTTPException(409, 'Count has no complete observations')
-                    if l.counted_quantity == l.expected_quantity:
-                        accurate += 1
-            if await session.scalar(select(Task.id).where(Task.tenant_id == tenant, Task.kind == data.kind, Task.source_id == data.sourceId)):
-                raise HTTPException(409, 'Activity source has already been recorded')
-            row = Task(tenant_id=tenant, shift_id=target.id, kind=data.kind, source_id=source.id,
-                movement_id=source.id if data.kind == 'PICK' else None, count_id=source.id if data.kind == 'COUNT' else None,
-                duration_seconds=data.durationSeconds, distance_meters=data.traversalDistanceMeters,
-                accurate_lines=accurate, total_lines=total, created_at=now)
-            session.add(row)
+            row = await _mutate_task(session, tenant, target, profile, data, now)
         elif operation == 'plan':
-            if data.targetDate < now.date():
-                raise HTTPException(400, 'Staffing plans require a current or future date')
-            recommendation = PredictiveSchedulingEngine().generate_staffing_recommendation(data.targetDate,
-                data.projectedInboundVolume, data.projectedOutboundVolume, data.averageOperatorTargetPicks, data.shiftDurationHours)
-            inputs = data.model_dump(mode='json', exclude={'mutationId', 'reason', 'tenantId', 'targetDate'})
-            available = await capacity(session, tenant, inputs)
-            row = Plan(tenant_id=tenant, target_date=data.targetDate.isoformat(), inputs=inputs,
-                recommendation={'recommendedHeadcount': recommendation.recommended_headcount, 'eligibleOperatorCount': available,
-                    'shortfall': max(0, recommendation.recommended_headcount-available), 'method': 'EXPLICIT_VOLUME_HEURISTIC'}, status='DRAFT', version=0)
-            session.add(row)
+            row = await _mutate_plan(session, tenant, data, now)
         else:
-            row = target
-            if row.version != data.expectedVersion or row.status != 'DRAFT':
-                raise HTTPException(409, 'Staffing plan is no longer this draft version')
-            if date.fromisoformat(row.target_date) < now.date():
-                raise HTTPException(409, 'Staffing date has passed')
-            available = await capacity(session, tenant, row.inputs)
-            row.recommendation = {**row.recommendation, 'eligibleOperatorCount': available,
-                'shortfall': max(0, row.recommendation['recommendedHeadcount']-available)}
-            row.status, row.version = 'PUBLISHED', row.version + 1
+            row = await _mutate_publish(session, tenant, target, data, now)
         await session.flush()
         result = dto(row)
         if operation in ('shift', 'cancel'):
