@@ -22,10 +22,8 @@ class StockService:
     def __init__(self, session, tenant_id, actor_id):
         self.session, self.tenant_id, self.actor_id = session, tenant_id, actor_id
 
-    async def mutate(self, operation, sku, location, amount, mutation_id=None, expected_version=None,
-                     unit_cost_cents=None, lot_number=None, expiration_date=None,
-                     received_at=None, quarantined=False, *, commit=True, config=None, reference=None,
-                     unit=None, uom_version=None):
+    @staticmethod
+    def _validate_inputs(operation, amount, unit, unit_cost_cents, expiration_date, received_at, quarantined, lot_number):
         if not unit and (type(amount) is not int or amount <= 0):
             raise ValueError('Quantity must be a positive integer')
         if unit_cost_cents is not None and (type(unit_cost_cents) is not int or not 0 <= unit_cost_cents <= 2_147_483_647):
@@ -34,6 +32,10 @@ class StockService:
             raise ValueError('Receipt costing metadata is only supported for receiving')
         if lot_number is not None and operation not in ('receive', 'dispatch', 'fulfill-allocation'):
             raise ValueError('Lot selection is only supported for receiving or dispatching')
+
+    @staticmethod
+    def _build_fingerprint(operation, sku, location, amount, expected_version, unit, uom_version,
+                           unit_cost_cents, lot_number, expiration_date, received_at, quarantined, reference):
         fingerprint = {'operation': operation, 'sku': sku, 'locationId': location,
                        'amount': amount, 'expectedVersion': expected_version}
         if unit:
@@ -46,6 +48,82 @@ class StockService:
             fingerprint['quarantined'] = True
         if reference:
             fingerprint['reference'] = reference
+        return fingerprint
+
+    async def _resolve_uom(self, operation, sku, amount, unit, uom_version, unit_cost_cents):
+        conversion, receipt_total = None, None
+        if unit:
+            from src.application.uom_service import convert_input
+            from src.domain.uom import receipt_value
+            original_amount = amount
+            amount, conversion = await convert_input(self.session, self.tenant_id, sku, amount, unit, uom_version)
+            if operation == 'receive' and unit_cost_cents is not None:
+                receipt_total = receipt_value(original_amount, unit_cost_cents)
+                unit_cost_cents = None  # Price is per input unit, not per ledger unit.
+        return amount, unit_cost_cents, conversion, receipt_total
+
+    async def _get_or_create_stock(self, sku, location, operation, expected_version):
+        product = await self.session.scalar(select(ProductModel.id).where(
+            ProductModel.tenant_id == self.tenant_id, ProductModel.sku == sku))
+        if not product:
+            raise ValueError('Product not found')
+        row = await self.session.scalar(select(StockModel).where(
+            StockModel.tenant_id == self.tenant_id, StockModel.sku == sku,
+            StockModel.location_id == location))
+        if not row:
+            if operation != 'receive':
+                raise ValueError('Stock not found at location')
+            row = StockModel(id=str(uuid.uuid4()), tenant_id=self.tenant_id,
+                             sku=sku, location_id=location, quantity=0, allocated=0, version=0)
+            self.session.add(row)
+            await self.session.flush()
+        if expected_version is not None and expected_version != row.version:
+            raise StockConflict('Stock version conflict')
+        return row
+
+    @staticmethod
+    def _calculate_quantities(operation, amount, current_quantity, current_allocated):
+        quantity, allocated = current_quantity, current_allocated
+        if operation == 'receive':
+            quantity += amount
+        elif operation == 'dispatch':
+            if quantity - allocated < amount:
+                raise ValueError('Insufficient available stock')
+            quantity -= amount
+        elif operation == 'allocate':
+            if quantity - allocated < amount:
+                raise ValueError('Insufficient available stock')
+            allocated += amount
+        elif operation == 'release-allocation':
+            if allocated < amount:
+                raise ValueError('Insufficient allocated stock')
+            allocated -= amount
+        elif operation == 'fulfill-allocation':
+            if allocated < amount:
+                raise ValueError('Insufficient allocated stock')
+            quantity -= amount
+            allocated -= amount
+        else:
+            raise ValueError('Unsupported stock operation')
+        if quantity > 2_147_483_647:
+            raise ValueError('Quantity exceeds supported stock limit')
+        return quantity, allocated
+
+    def _record_movement(self, row_id, sku, location, operation, amount, mutation_id, fingerprint, result):
+        self.session.add(StockMovementModel(tenant_id=self.tenant_id, mutation_id=mutation_id,
+            actor_id=self.actor_id, sku=sku, location_id=location, operation=operation,
+            amount=amount, request=fingerprint, result=result))
+        self.session.add(OutboxEventModel(aggregate_type='Stock', aggregate_id=row_id,
+            event_type='StockChanged', payload={**result, 'tenantId': self.tenant_id,
+                'actorId': self.actor_id, 'mutationId': mutation_id, 'operation': operation}))
+
+    async def mutate(self, operation, sku, location, amount, mutation_id=None, expected_version=None,
+                     unit_cost_cents=None, lot_number=None, expiration_date=None,
+                     received_at=None, quarantined=False, *, commit=True, config=None, reference=None,
+                     unit=None, uom_version=None):
+        self._validate_inputs(operation, amount, unit, unit_cost_cents, expiration_date, received_at, quarantined, lot_number)
+        fingerprint = self._build_fingerprint(operation, sku, location, amount, expected_version, unit, uom_version,
+                                             unit_cost_cents, lot_number, expiration_date, received_at, quarantined, reference)
         mutation_id = mutation_id or str(uuid.uuid4())
         try:
             config = config or await locked_config(self.session, self.tenant_id)
@@ -59,56 +137,13 @@ class StockService:
                 if commit:
                     await self.session.rollback()
                 return result
-            conversion, receipt_total = None, None
-            if unit:
-                from src.application.uom_service import convert_input
-                from src.domain.uom import receipt_value
-                original_amount = amount
-                amount, conversion = await convert_input(self.session, self.tenant_id, sku, amount, unit, uom_version)
-                if operation == 'receive' and unit_cost_cents is not None:
-                    receipt_total = receipt_value(original_amount, unit_cost_cents)
-                    unit_cost_cents = None  # Price is per input unit, not per ledger unit.
-            product = await self.session.scalar(select(ProductModel.id).where(
-                ProductModel.tenant_id == self.tenant_id, ProductModel.sku == sku))
-            if not product:
-                raise ValueError('Product not found')
-            row = await self.session.scalar(select(StockModel).where(
-                StockModel.tenant_id == self.tenant_id, StockModel.sku == sku,
-                StockModel.location_id == location))
-            if not row:
-                if operation != 'receive':
-                    raise ValueError('Stock not found at location')
-                row = StockModel(id=str(uuid.uuid4()), tenant_id=self.tenant_id,
-                                 sku=sku, location_id=location, quantity=0, allocated=0, version=0)
-                self.session.add(row)
-                await self.session.flush()
+
+            amount, unit_cost_cents, conversion, receipt_total = await self._resolve_uom(
+                operation, sku, amount, unit, uom_version, unit_cost_cents)
+            row = await self._get_or_create_stock(sku, location, operation, expected_version)
             version = row.version
-            if expected_version is not None and expected_version != version:
-                raise StockConflict('Stock version conflict')
-            quantity, allocated = row.quantity, row.allocated
-            if operation == 'receive':
-                quantity += amount
-            elif operation == 'dispatch':
-                if quantity - allocated < amount:
-                    raise ValueError('Insufficient available stock')
-                quantity -= amount
-            elif operation == 'allocate':
-                if quantity - allocated < amount:
-                    raise ValueError('Insufficient available stock')
-                allocated += amount
-            elif operation == 'release-allocation':
-                if allocated < amount:
-                    raise ValueError('Insufficient allocated stock')
-                allocated -= amount
-            elif operation == 'fulfill-allocation':
-                if allocated < amount:
-                    raise ValueError('Insufficient allocated stock')
-                quantity -= amount
-                allocated -= amount
-            else:
-                raise ValueError('Unsupported stock operation')
-            if quantity > 2_147_483_647:
-                raise ValueError('Quantity exceeds supported stock limit')
+            quantity, allocated = self._calculate_quantities(operation, amount, row.quantity, row.allocated)
+
             costing = await apply_costing(self.session, self.tenant_id, row, operation, amount,
                 config.costing_method, unit_cost_cents, lot_number, expiration_date, received_at, quarantined,
                 receipt_value_cents=receipt_total)
@@ -127,12 +162,8 @@ class StockService:
                 result['inputUom'] = conversion
                 if operation == 'receive':
                     result['receiptValueCents'] = receipt_total
-            self.session.add(StockMovementModel(tenant_id=self.tenant_id, mutation_id=mutation_id,
-                actor_id=self.actor_id, sku=sku, location_id=location, operation=operation,
-                amount=amount, request=fingerprint, result=result))
-            self.session.add(OutboxEventModel(aggregate_type='Stock', aggregate_id=row.id,
-                event_type='StockChanged', payload={**result, 'tenantId': self.tenant_id,
-                    'actorId': self.actor_id, 'mutationId': mutation_id, 'operation': operation}))
+
+            self._record_movement(row.id, sku, location, operation, amount, mutation_id, fingerprint, result)
             if commit:
                 await self.session.commit()
             else:
