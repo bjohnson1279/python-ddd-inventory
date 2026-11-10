@@ -229,6 +229,10 @@
 **Learning:** In `return_service.py`, checking for `sum()` of remaining quantities and `any()` expiration dates across cost layers using multiple generator comprehensions repeats O(N) traversals, and calls `datetime.now()` repeatedly within the loop for every layer, significantly increasing overhead.
 **Action:** Consolidate multiple generator comprehensions into a single O(N) `for` loop, accumulating values and evaluating conditionals simultaneously, and cache expensive `datetime.now()` calls outside of the loop.
 
+## 2026-11-10 - Eager Join for In-Transit Serial Catalog Lookup
+**Learning:** In `valuation_report`, fetching all tenant products into an in-memory dictionary or querying serialized items without joining causes high memory overhead and inefficient traversals as catalog sizes grow. Outerjoining `ProductModel` onto `SerialModel` by SKU and tenant ID retrieves only the needed product records in a single database round-trip.
+**Action:** When querying serialized items that require associated catalog product details, use an eager outerjoin on the SKU and tenant ID directly in the SQL query rather than loading full catalogs into memory.
+
 ## 2024-11-10 - O(1) Hoisting in Sorting and Traversal Lambdas
 **Learning:** In the domain product layer costing (`src/domain/product/layer_costing.py`), repeatedly constructing invariants like `utc(now)` inside loop structures (`eligible_quantity`, `eligible_layers`) and `datetime.max` inside highly-conditional sort lambdas (`consume`) caused severe slowdowns (~2-6s on 10,000 layers) because `datetime` manipulations and tuple creations run on every item.
 **Action:** Extract invariant operations outside of `for` loops and comprehensions. Avoid heavily conditional sort lambdas by branching via `if/else` and providing simpler, dedicated sort functions for each path.
