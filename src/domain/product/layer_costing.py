@@ -36,11 +36,13 @@ def half_up(numerator, denominator):
 
 def eligible_quantity(layers, method, now=None, lot_number=None):
     now = now or datetime.now(timezone.utc)
+    # Bolt Optimization: Hoist invariant utc(now) out of the O(N) loop
+    now_utc = utc(now)
     total = 0
     for layer in layers:
         if (layer.remaining_quantity > 0
             and not layer.quarantined
-            and (layer.expiration_date is None or utc(layer.expiration_date) > utc(now))
+            and (layer.expiration_date is None or utc(layer.expiration_date) > now_utc)
             and (lot_number is None or layer.lot_number == lot_number)):
             total += layer.remaining_quantity
     return total
@@ -48,13 +50,17 @@ def eligible_quantity(layers, method, now=None, lot_number=None):
 
 def eligible_layers(layers, method, now=None, lot_number=None):
     now = now or datetime.now(timezone.utc)
+    # Bolt Optimization: Hoist invariant utc(now) out of the O(N) loop
+    now_utc = utc(now)
     usable = [layer for layer in layers if layer.remaining_quantity > 0
               and not layer.quarantined
-              and (layer.expiration_date is None or utc(layer.expiration_date) > utc(now))
+              and (layer.expiration_date is None or utc(layer.expiration_date) > now_utc)
               and (lot_number is None or layer.lot_number == lot_number)]
     if method == CostingMethod.FEFO:
+        # Bolt Optimization: Hoist invariant max datetime out of the sort lambda
+        max_dt = datetime.max.replace(tzinfo=timezone.utc)
         return sorted(usable, key=lambda layer: (
-            utc(layer.expiration_date) if layer.expiration_date else datetime.max.replace(tzinfo=timezone.utc),
+            utc(layer.expiration_date) if layer.expiration_date else max_dt,
             utc(layer.received_at), layer.id))
     return sorted(usable, key=lambda layer: (utc(layer.received_at), layer.id),
                   reverse=method == CostingMethod.LIFO)
@@ -90,11 +96,15 @@ def consume(layers, quantity, method, now=None, lot_number=None, include_ineligi
     if include_ineligible:
         selected = [layer for layer in layers if layer.remaining_quantity > 0
                     and (lot_number is None or layer.lot_number == lot_number)]
-        selected.sort(key=lambda layer: (
-            utc(layer.expiration_date) if method == CostingMethod.FEFO and layer.expiration_date
-            else datetime.max.replace(tzinfo=timezone.utc) if method == CostingMethod.FEFO
-            else utc(layer.received_at), utc(layer.received_at), layer.id),
-            reverse=method == CostingMethod.LIFO)
+        # Bolt Optimization: Split complex sort lambda for FEFO/non-FEFO paths and hoist invariant max_dt
+        if method == CostingMethod.FEFO:
+            max_dt = datetime.max.replace(tzinfo=timezone.utc)
+            selected.sort(key=lambda layer: (
+                utc(layer.expiration_date) if layer.expiration_date else max_dt,
+                utc(layer.received_at), layer.id))
+        else:
+            selected.sort(key=lambda layer: (utc(layer.received_at), layer.id),
+                          reverse=method == CostingMethod.LIFO)
     if layer_ids is not None:
         selected = [layer for layer in selected if layer.id in layer_ids]
     if sum(layer.remaining_quantity for layer in selected) < quantity:
