@@ -24,6 +24,7 @@ The following guides provide detailed specifications for each subsystem:
 - [Inventory Aging & Dead Stock Analysis](AGING.md)
 - [Workforce Management](WORKFORCE.md)
 - [Security & RBAC](SECURITY.md)
+- [GraphQL API](GRAPHQL.md)
 
 ## Quick Start & Local Setup
 
