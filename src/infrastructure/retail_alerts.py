@@ -3,7 +3,7 @@ import json
 import hashlib
 import uuid
 from datetime import timedelta
-from sqlalchemy import select, update, event
+from sqlalchemy import select, update, event, tuple_
 from src.infrastructure.report_alert_models import AlertConfig, AlertCondition as Condition, AlertNotice as Notice
 from src.infrastructure.owned_feature_models import NotificationModel as Notification
 from src.infrastructure.auth.identity import UserModel
@@ -69,10 +69,16 @@ def evaluate(connection, tenant, scope=None):
                     f"{kind.replace('_', ' ').title()}: {layer['sku']} at {layer['location_id']}, lot {layer['lot_number'] or 'unassigned'}, expiry {expiration.isoformat()}.")
     existing = {r['key']: r for r in connection.execute(select(Condition.__table__).where(Condition.tenant_id == tenant)).mappings()
         if not scope or (r['facts'].get('sku'), r['facts'].get('locationId')) == scope}
+    # Collect inactive condition IDs and notice keys to execute single bulk updates instead of 2*N blocking queries in a loop
+    deactivate_condition_ids = []
+    resolve_notice_keys = []
     for key, row in existing.items():
         if row['active'] and key not in detected:
-            connection.execute(update(Condition).where(Condition.id == row['id'], Condition.tenant_id == tenant).values(active=False, evaluated_at=now))
-            connection.execute(update(Notice).where(Notice.tenant_id == tenant, Notice.condition_id == row['id'], Notice.episode == row['episode']).values(resolved=True))
+            deactivate_condition_ids.append(row['id'])
+            resolve_notice_keys.append((row['id'], row['episode']))
+    if deactivate_condition_ids:
+        connection.execute(update(Condition).where(Condition.id.in_(deactivate_condition_ids), Condition.tenant_id == tenant).values(active=False, evaluated_at=now))
+        connection.execute(update(Notice).where(Notice.tenant_id == tenant, tuple_(Notice.condition_id, Notice.episode).in_(resolve_notice_keys)).values(resolved=True))
     recipients = list(connection.scalars(select(UserModel.id).where(UserModel.tenant_id == tenant, UserModel.is_active.is_(True),
         UserModel.role.in_(['ADMIN', 'MANAGER', 'WAREHOUSE_OPERATOR']))))
     count = 0
