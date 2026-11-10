@@ -14,7 +14,7 @@ router = APIRouter(prefix='/aging', tags=['aging'])
 
 
 @router.get('/report')
-@requires_roles(['ADMIN', 'MANAGER', 'USER', 'VIEWER', 'ACCOUNTANT'])
+@requires_roles(['ADMIN', 'MANAGER', 'USER', 'VIEWER', 'ACCOUNTANT', 'WAREHOUSE_OPERATOR'])
 async def aging_report(request: Request, session: AsyncSession = Depends(get_db_session)):
     from src.application.retail_reports import snapshot
     from src.infrastructure.financial_posting import database_now

@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 from src.domain.product.lot_tracking import Lot, LotTrackingEngine
-from src.domain.product.value_objects import SKU
+from src.domain.product.value_objects import SKU, LotStatus
 from src.domain.product.exceptions import InvalidSKUError
 
 def test_lot_initialization():
@@ -144,3 +144,34 @@ def test_engine_operations_with_sku_instance():
     # Test trigger_supplier_recall with SKU object
     recalled = engine.trigger_supplier_recall("SUP-1", sku_vo)
     assert len(recalled) == 2
+
+def test_lot_status_coercion_and_validation():
+    now = datetime.now(timezone.utc)
+    lot = Lot(
+        id="lot-status",
+        sku="SKU-1",
+        supplier_id="SUP-1",
+        expiration_date=now + timedelta(days=30),
+        status="QUARANTINED"
+    )
+    assert isinstance(lot.status, LotStatus)
+    assert lot.status == LotStatus.QUARANTINED
+    assert lot.status == "QUARANTINED"
+
+    lot_enum = Lot(
+        id="lot-enum",
+        sku="SKU-1",
+        supplier_id="SUP-1",
+        expiration_date=now + timedelta(days=30),
+        status=LotStatus.RECALLED
+    )
+    assert lot_enum.status == LotStatus.RECALLED
+
+    with pytest.raises(ValueError):
+        Lot(
+            id="lot-invalid-status",
+            sku="SKU-1",
+            supplier_id="SUP-1",
+            expiration_date=now + timedelta(days=30),
+            status="INVALID_STATUS"
+        )

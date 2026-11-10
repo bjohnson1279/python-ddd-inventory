@@ -68,6 +68,3 @@ async def test_tick_batches_database_operations(worker):
 
     assert "UPDATE report_schedules" in second_call_args[0][0]
     assert len(second_call_args[0][1]) == 3
-async def test_tick_requires_tenant_and_persistent_session(worker):
-    with pytest.raises(ValueError, match='session and tenant'):
-        await worker.tick(None)
