@@ -94,12 +94,7 @@ class SerialKitWorkflow(InventoryWorkflow):
         row.layer_id = layer.id
         return layer
 
-    async def change_serial(self, data, key):
-        row = await self.serial(data['serialNumber'])
-        if row.version != data['expectedVersion']:
-            raise StockConflict('Serial version conflict')
-        action = data['action']
-        old = row.status
+    def _validate_serial_change(self, action, old, data):
         if data.get('expirationDate') is not None and not (old == 'pending' and action in ('receive', 'quarantine')):
             raise ValueError('Expiration metadata is only supported for initial receiving')
         if data.get('destinationId') is not None and action != 'transfer':
@@ -108,89 +103,107 @@ class SerialKitWorkflow(InventoryWorkflow):
             raise ValueError('Location is only supported for receiving or returns')
         if data.get('unitCostCents') is not None and action != 'price' and not (old == 'pending' and action in ('receive', 'quarantine')):
             raise ValueError('Cost metadata is only supported for initial receiving or explicit pricing')
-        details = {'operation': 'serial-' + action, 'serialNumber': row.serial_number, 'fromStatus': old, 'costOfGoodsSoldCents': 0}
-        if action == 'price':
-            if old not in ('in_stock', 'returned', 'quarantined', 'damaged') or row.cost_cents is not None or data.get('unitCostCents') is None:
-                raise StockConflict('Only an unpriced serial physically on hand can be priced')
-            stock = await self.stock(row.sku, row.location_id)
-            layer = await self.session.scalar(select(CostLayerModel).where(CostLayerModel.id == row.layer_id,
-                CostLayerModel.tenant_id == self.tenant, CostLayerModel.stock_id == stock.id))
-            if layer is None or layer.remaining_quantity != 1 or layer.unit_cost_cents is not None:
-                raise StockConflict('Serial cost layer does not match unpriced physical inventory')
-            value = data['unitCostCents']
-            row.cost_cents = layer.unit_cost_cents = layer.initial_value_cents = layer.remaining_value_cents = value
-            details['inventoryValueChangeCents'] = value
-            await self.serial_record(stock, 0, 0, key, details)
-            target = old
-        elif action in ('reserve', 'release'):
-            if old != 'in_stock' or action == 'reserve' and row.reservation or action == 'release' and row.reservation != data['referenceId']:
-                raise StockConflict('Serial reservation does not match current state')
+
+    async def _handle_serial_price(self, row, old, data, key, details):
+        if old not in ('in_stock', 'returned', 'quarantined', 'damaged') or row.cost_cents is not None or data.get('unitCostCents') is None:
+            raise StockConflict('Only an unpriced serial physically on hand can be priced')
+        stock = await self.stock(row.sku, row.location_id)
+        layer = await self.session.scalar(select(CostLayerModel).where(CostLayerModel.id == row.layer_id,
+            CostLayerModel.tenant_id == self.tenant, CostLayerModel.stock_id == stock.id))
+        if layer is None or layer.remaining_quantity != 1 or layer.unit_cost_cents is not None:
+            raise StockConflict('Serial cost layer does not match unpriced physical inventory')
+        value = data['unitCostCents']
+        row.cost_cents = layer.unit_cost_cents = layer.initial_value_cents = layer.remaining_value_cents = value
+        details['inventoryValueChangeCents'] = value
+        await self.serial_record(stock, 0, 0, key, details)
+        return old
+
+    async def _handle_serial_reservation(self, row, action, old, data, key, details):
+        if old != 'in_stock' or action == 'reserve' and row.reservation or action == 'release' and row.reservation != data['referenceId']:
+            raise StockConflict('Serial reservation does not match current state')
+        stock = await self.stock(row.sku, row.location_id)
+        layer = await self.session.scalar(select(CostLayerModel).where(CostLayerModel.id == row.layer_id,
+            CostLayerModel.tenant_id == self.tenant, CostLayerModel.stock_id == stock.id))
+        if not layer or layer.remaining_quantity != 1:
+            raise StockConflict('Serial cost layer does not match physical inventory')
+        if action == 'reserve' and not eligible_layers([layer], 'FIFO'):
+            raise StockConflict('Serial is not eligible for reservation')
+        await self.serial_record(stock, 0, 1 if action == 'reserve' else -1, key, details)
+        row.reservation = data['referenceId'] if action == 'reserve' else None
+        return old
+
+    async def _handle_serial_transition(self, row, action, old, data, key, details):
+        targets = {'receive': 'in_stock', 'sell': 'sold', 'return': 'returned', 'restock': 'in_stock',
+            'quarantine': 'quarantined', 'damage': 'damaged', 'write-off': 'written_off', 'transfer': 'transferred'}
+        target = targets[action]
+        if target not in TRANSITIONS[old] or action == 'receive' and old not in ('pending', 'transferred') or action == 'restock' and old in ('pending', 'transferred'):
+            raise StockConflict('Invalid serial status transition')
+        if row.reservation and target != 'sold':
+            raise StockConflict('Release the serial reservation before changing its physical state')
+        if data.get('unitCostCents') is not None and old != 'pending':
+            raise ValueError('Only initial receiving may supply purchase cost')
+        if old == 'pending' and target != 'written_off' or old in ('sold', 'transferred'):
+            location = row.destination_id if old == 'transferred' else row.location_id
+            if data.get('locationId') and data['locationId'] != location:
+                raise ValueError('Receiving location must match the serial destination')
+            stock = await self.stock(row.sku, location, create=True)
+            if old == 'pending':
+                row.cost_cents = data.get('unitCostCents')
+            if old in ('sold', 'transferred'):
+                original = await self.session.scalar(select(CostLayerModel).where(CostLayerModel.id == row.layer_id, CostLayerModel.tenant_id == self.tenant))
+                if original is None:
+                    raise StockConflict('Serial source cost layer is missing')
+                data = {**data, 'expirationDate': original.expiration_date}
+            layer = await self.serial_layer(row, stock, data, target != 'in_stock')
+            row.location_id, row.destination_id = location, None
+            if old == 'sold':
+                details['cogsReversedCents'] = row.cost_cents
+                details['sourceLayerId'] = original.id
+            details.update(receiptValueCents=row.cost_cents, costLayerId=layer.id)
+            await self.serial_record(stock, 1, 0, key, details)
+        elif old != 'pending':
             stock = await self.stock(row.sku, row.location_id)
             layer = await self.session.scalar(select(CostLayerModel).where(CostLayerModel.id == row.layer_id,
                 CostLayerModel.tenant_id == self.tenant, CostLayerModel.stock_id == stock.id))
             if not layer or layer.remaining_quantity != 1:
                 raise StockConflict('Serial cost layer does not match physical inventory')
-            if action == 'reserve' and not eligible_layers([layer], 'FIFO'):
-                raise StockConflict('Serial is not eligible for reservation')
-            await self.serial_record(stock, 0, 1 if action == 'reserve' else -1, key, details)
-            row.reservation = data['referenceId'] if action == 'reserve' else None
-            target = old
+            if target == 'sold' and (not eligible_layers([layer], 'FIFO') or row.reservation and row.reservation != data['referenceId']):
+                raise StockConflict('Serial is unavailable or reserved for another sale')
+            if target == 'transferred' and (row.reservation or not data.get('destinationId') or data['destinationId'] == row.location_id):
+                raise ValueError('Transfer requires another destination and an unreserved serial')
+            allocation = -1 if row.reservation else 0
+            if target in ('sold', 'written_off', 'transferred'):
+                details['sourceCostLayerId'] = layer.id
+                row.cost_cents = layer.remaining_value_cents
+                layer.remaining_quantity, layer.remaining_value_cents = 0, 0
+                delta = -1
+                details['costOfGoodsSoldCents'] = row.cost_cents if target == 'sold' else 0
+                if target == 'written_off':
+                    details['inventoryValueChangeCents'] = -row.cost_cents if row.cost_cents is not None else None
+                if target == 'transferred':
+                    row.destination_id = data['destinationId']
+                    details['transferredValueCents'] = row.cost_cents
+            else:
+                delta = 0
+                layer.quarantined = target != 'in_stock'
+            await self.serial_record(stock, delta, allocation, key, details)
+            row.reservation = None
+        return target
+
+    async def change_serial(self, data, key):
+        row = await self.serial(data['serialNumber'])
+        if row.version != data['expectedVersion']:
+            raise StockConflict('Serial version conflict')
+        action = data['action']
+        old = row.status
+        self._validate_serial_change(action, old, data)
+        details = {'operation': 'serial-' + action, 'serialNumber': row.serial_number, 'fromStatus': old, 'costOfGoodsSoldCents': 0}
+        if action == 'price':
+            target = await self._handle_serial_price(row, old, data, key, details)
+        elif action in ('reserve', 'release'):
+            target = await self._handle_serial_reservation(row, action, old, data, key, details)
         else:
-            targets = {'receive': 'in_stock', 'sell': 'sold', 'return': 'returned', 'restock': 'in_stock',
-                'quarantine': 'quarantined', 'damage': 'damaged', 'write-off': 'written_off', 'transfer': 'transferred'}
-            target = targets[action]
-            if target not in TRANSITIONS[old] or action == 'receive' and old not in ('pending', 'transferred') or action == 'restock' and old in ('pending', 'transferred'):
-                raise StockConflict('Invalid serial status transition')
-            if row.reservation and target != 'sold':
-                raise StockConflict('Release the serial reservation before changing its physical state')
-            if data.get('unitCostCents') is not None and old != 'pending':
-                raise ValueError('Only initial receiving may supply purchase cost')
-            if old == 'pending' and target != 'written_off' or old in ('sold', 'transferred'):
-                location = row.destination_id if old == 'transferred' else row.location_id
-                if data.get('locationId') and data['locationId'] != location:
-                    raise ValueError('Receiving location must match the serial destination')
-                stock = await self.stock(row.sku, location, create=True)
-                if old == 'pending':
-                    row.cost_cents = data.get('unitCostCents')
-                if old in ('sold', 'transferred'):
-                    original = await self.session.scalar(select(CostLayerModel).where(CostLayerModel.id == row.layer_id, CostLayerModel.tenant_id == self.tenant))
-                    if original is None:
-                        raise StockConflict('Serial source cost layer is missing')
-                    data = {**data, 'expirationDate': original.expiration_date}
-                layer = await self.serial_layer(row, stock, data, target != 'in_stock')
-                row.location_id, row.destination_id = location, None
-                if old == 'sold':
-                    details['cogsReversedCents'] = row.cost_cents
-                    details['sourceLayerId'] = original.id
-                details.update(receiptValueCents=row.cost_cents, costLayerId=layer.id)
-                await self.serial_record(stock, 1, 0, key, details)
-            elif old != 'pending':
-                stock = await self.stock(row.sku, row.location_id)
-                layer = await self.session.scalar(select(CostLayerModel).where(CostLayerModel.id == row.layer_id,
-                    CostLayerModel.tenant_id == self.tenant, CostLayerModel.stock_id == stock.id))
-                if not layer or layer.remaining_quantity != 1:
-                    raise StockConflict('Serial cost layer does not match physical inventory')
-                if target == 'sold' and (not eligible_layers([layer], 'FIFO') or row.reservation and row.reservation != data['referenceId']):
-                    raise StockConflict('Serial is unavailable or reserved for another sale')
-                if target == 'transferred' and (row.reservation or not data.get('destinationId') or data['destinationId'] == row.location_id):
-                    raise ValueError('Transfer requires another destination and an unreserved serial')
-                allocation = -1 if row.reservation else 0
-                if target in ('sold', 'written_off', 'transferred'):
-                    details['sourceCostLayerId'] = layer.id
-                    row.cost_cents = layer.remaining_value_cents
-                    layer.remaining_quantity, layer.remaining_value_cents = 0, 0
-                    delta = -1
-                    details['costOfGoodsSoldCents'] = row.cost_cents if target == 'sold' else 0
-                    if target == 'written_off':
-                        details['inventoryValueChangeCents'] = -row.cost_cents if row.cost_cents is not None else None
-                    if target == 'transferred':
-                        row.destination_id = data['destinationId']
-                        details['transferredValueCents'] = row.cost_cents
-                else:
-                    delta = 0
-                    layer.quarantined = target != 'in_stock'
-                await self.serial_record(stock, delta, allocation, key, details)
-                row.reservation = None
+            target = await self._handle_serial_transition(row, action, old, data, key, details)
         history = copy.deepcopy(row.history)
         history.append({'fromStatus': old, 'toStatus': target, 'action': action, 'reason': data['reason'],
             'referenceId': data['referenceId'], 'actorId': self.actor, 'occurredAt': datetime.now(timezone.utc).isoformat(),
