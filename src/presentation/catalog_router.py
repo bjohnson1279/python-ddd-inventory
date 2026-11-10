@@ -57,24 +57,51 @@ async def catalog(request: Request, session: AsyncSession = Depends(get_db_sessi
     tenant = current_tenant(request)
     parents = await session.scalars(select(CatalogModel).where(CatalogModel.tenant_id == tenant))
     result = {p.id: {'id': p.id, 'name': p.name, 'variants': []} for p in parents}
-    links = {link.sku: link for link in await session.scalars(select(VariantLinkModel).where(
-        VariantLinkModel.tenant_id == tenant))}
+
+    # Performance optimization: Query column projections rather than full ORM entity models.
+    # Selecting raw column tuples eliminates ORM identity map tracking, object lifecycle overhead,
+    # and reduces memory allocations when loading large collections of variants and barcodes.
+    link_rows = (await session.execute(
+        select(VariantLinkModel.sku, VariantLinkModel.product_id, VariantLinkModel.attributes)
+        .where(VariantLinkModel.tenant_id == tenant)
+    )).all()
+    links = {sku: (product_id, attributes) for sku, product_id, attributes in link_rows}
+
     barcodes = {}
-    for row in await session.scalars(select(BarcodeModel).where(BarcodeModel.tenant_id == tenant)):
-        barcodes.setdefault(row.sku, []).append({'id': row.id, 'sku': row.sku,
-            'barcode': {'value': row.value, 'symbology': row.symbology},
-            'source': row.source, 'isPrimary': row.is_primary, 'assignedAt': row.assigned_at.isoformat()})
-    products = await session.scalars(select(ProductModel).where(ProductModel.tenant_id == tenant)
-                                    .order_by(ProductModel.sku))
+    barcode_rows = (await session.execute(
+        select(
+            BarcodeModel.id, BarcodeModel.sku, BarcodeModel.value,
+            BarcodeModel.symbology, BarcodeModel.source, BarcodeModel.is_primary,
+            BarcodeModel.assigned_at
+        ).where(BarcodeModel.tenant_id == tenant)
+    )).all()
+    for b_id, b_sku, b_val, b_sym, b_src, b_prim, b_at in barcode_rows:
+        barcodes.setdefault(b_sku, []).append({
+            'id': b_id, 'sku': b_sku,
+            'barcode': {'value': b_val, 'symbology': b_sym},
+            'source': b_src, 'isPrimary': b_prim,
+            'assignedAt': b_at.isoformat() if hasattr(b_at, 'isoformat') else str(b_at)
+        })
+
+    products = (await session.execute(
+        select(ProductModel.id, ProductModel.sku, ProductModel.name)
+        .where(ProductModel.tenant_id == tenant)
+        .order_by(ProductModel.sku)
+    )).all()
+
     from src.infrastructure.serial_kit_models import TrackingModel
     tracked = set(await session.scalars(select(TrackingModel.sku).where(TrackingModel.tenant_id == tenant)))
-    for variant in products:
-        link = links.get(variant.sku)
-        product_id = link.product_id if link else variant.id
-        result.setdefault(product_id, {'id': product_id, 'name': variant.name, 'variants': []})
-        result[product_id]['variants'].append({'id': variant.id, 'sku': variant.sku,
-            'trackingMode': 'serial' if variant.sku in tracked else 'quantity',
-            'attributes': link.attributes if link else [], 'barcodes': barcodes.get(variant.sku, [])})
+
+    for v_id, v_sku, v_name in products:
+        link_info = links.get(v_sku)
+        product_id = link_info[0] if link_info else v_id
+        attributes = link_info[1] if link_info else []
+        result.setdefault(product_id, {'id': product_id, 'name': v_name, 'variants': []})
+        result[product_id]['variants'].append({
+            'id': v_id, 'sku': v_sku,
+            'trackingMode': 'serial' if v_sku in tracked else 'quantity',
+            'attributes': attributes, 'barcodes': barcodes.get(v_sku, [])
+        })
     return list(result.values())
 
 
