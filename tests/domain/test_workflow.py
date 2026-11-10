@@ -1,5 +1,57 @@
 import pytest
-from src.domain.workflow import ApprovalWorkflowEngine, WorkflowExecution, ApprovalStep
+from src.domain.workflow import (
+    ApprovalWorkflowEngine,
+    WorkflowExecution,
+    ApprovalStep,
+    StepStatus,
+    WorkflowStatus,
+)
+
+def test_step_status_enum_values():
+    assert StepStatus.PENDING == "PENDING"
+    assert StepStatus.APPROVED == "APPROVED"
+    assert StepStatus.REJECTED == "REJECTED"
+    assert isinstance(StepStatus.PENDING, str)
+
+def test_workflow_status_enum_values():
+    assert WorkflowStatus.IN_PROGRESS == "IN_PROGRESS"
+    assert WorkflowStatus.APPROVED == "APPROVED"
+    assert WorkflowStatus.REJECTED == "REJECTED"
+    assert isinstance(WorkflowStatus.IN_PROGRESS, str)
+
+def test_approval_step_initialization_with_enum_and_string():
+    step_default = ApprovalStep(role="manager")
+    assert isinstance(step_default.status, StepStatus)
+    assert step_default.status == StepStatus.PENDING
+    assert step_default.status == "PENDING"
+
+    step_enum = ApprovalStep(role="manager", status=StepStatus.APPROVED)
+    assert isinstance(step_enum.status, StepStatus)
+    assert step_enum.status == StepStatus.APPROVED
+
+    step_str = ApprovalStep(role="manager", status="REJECTED")
+    assert isinstance(step_str.status, StepStatus)
+    assert step_str.status == StepStatus.REJECTED
+
+    with pytest.raises(ValueError):
+        ApprovalStep(role="manager", status="INVALID_STATUS")
+
+def test_workflow_execution_initialization_with_enum_and_string():
+    exec_default = WorkflowExecution()
+    assert isinstance(exec_default.status, WorkflowStatus)
+    assert exec_default.status == WorkflowStatus.IN_PROGRESS
+    assert exec_default.status == "IN_PROGRESS"
+
+    exec_enum = WorkflowExecution(status=WorkflowStatus.APPROVED)
+    assert isinstance(exec_enum.status, WorkflowStatus)
+    assert exec_enum.status == WorkflowStatus.APPROVED
+
+    exec_str = WorkflowExecution(status="REJECTED")
+    assert isinstance(exec_str.status, WorkflowStatus)
+    assert exec_str.status == WorkflowStatus.REJECTED
+
+    with pytest.raises(ValueError):
+        WorkflowExecution(status="INVALID_STATUS")
 
 def test_workflow_engine_register_template():
     engine = ApprovalWorkflowEngine()
