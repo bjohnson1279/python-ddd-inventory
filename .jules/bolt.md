@@ -232,3 +232,7 @@
 ## 2024-11-10 - O(1) Hoisting in Sorting and Traversal Lambdas
 **Learning:** In the domain product layer costing (`src/domain/product/layer_costing.py`), repeatedly constructing invariants like `utc(now)` inside loop structures (`eligible_quantity`, `eligible_layers`) and `datetime.max` inside highly-conditional sort lambdas (`consume`) caused severe slowdowns (~2-6s on 10,000 layers) because `datetime` manipulations and tuple creations run on every item.
 **Action:** Extract invariant operations outside of `for` loops and comprehensions. Avoid heavily conditional sort lambdas by branching via `if/else` and providing simpler, dedicated sort functions for each path.
+
+## 2026-11-11 - Bulk database updates for deactivated alert conditions and notices
+**Learning:** In `src/infrastructure/retail_alerts.py`, iterating over existing conditions and executing individual `update(Condition)` and `update(Notice)` statements inside a loop issues 2*N blocking database queries. On large sets of existing conditions, this introduces severe query roundtrip overhead.
+**Action:** Accumulate condition IDs and (condition_id, episode) pairs across the loop and execute single bulk updates using `WHERE id IN (...)` and `WHERE (condition_id, episode) IN (...)`.
