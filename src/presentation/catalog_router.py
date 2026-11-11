@@ -55,16 +55,16 @@ def barcode_dto(row):
 @requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def catalog(request: Request, session: AsyncSession = Depends(get_db_session)):
     tenant = current_tenant(request)
-    parents = await session.scalars(select(CatalogModel).where(CatalogModel.tenant_id == tenant))
+    parents = await session.execute(select(CatalogModel.id, CatalogModel.name).where(CatalogModel.tenant_id == tenant))
     result = {p.id: {'id': p.id, 'name': p.name, 'variants': []} for p in parents}
-    links = {link.sku: link for link in await session.scalars(select(VariantLinkModel).where(
+    links = {row.sku: row for row in await session.execute(select(VariantLinkModel.sku, VariantLinkModel.product_id, VariantLinkModel.attributes).where(
         VariantLinkModel.tenant_id == tenant))}
     barcodes = {}
-    for row in await session.scalars(select(BarcodeModel).where(BarcodeModel.tenant_id == tenant)):
+    for row in await session.execute(select(BarcodeModel.id, BarcodeModel.sku, BarcodeModel.value, BarcodeModel.symbology, BarcodeModel.source, BarcodeModel.is_primary, BarcodeModel.assigned_at).where(BarcodeModel.tenant_id == tenant)):
         barcodes.setdefault(row.sku, []).append({'id': row.id, 'sku': row.sku,
             'barcode': {'value': row.value, 'symbology': row.symbology},
             'source': row.source, 'isPrimary': row.is_primary, 'assignedAt': row.assigned_at.isoformat()})
-    products = await session.scalars(select(ProductModel).where(ProductModel.tenant_id == tenant)
+    products = await session.execute(select(ProductModel.id, ProductModel.sku, ProductModel.name).where(ProductModel.tenant_id == tenant)
                                     .order_by(ProductModel.sku))
     from src.infrastructure.serial_kit_models import TrackingModel
     tracked = set(await session.scalars(select(TrackingModel.sku).where(TrackingModel.tenant_id == tenant)))
