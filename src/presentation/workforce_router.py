@@ -135,130 +135,6 @@ def consecutive_limit(intervals, hours, candidate=None):
     if any((end-start).total_seconds() > hours*3600 for start, end in relevant):
         raise HTTPException(409, 'Consecutive planned shifts exceed the operator limit')
 
-async def _mutate_profile(session, tenant, identifier, target, data):
-    if not target.is_active or target.role != 'WAREHOUSE_OPERATOR':
-        raise HTTPException(409, 'Profiles require an active warehouse operator')
-    row = await session.scalar(select(Profile).where(Profile.tenant_id == tenant, Profile.user_id == identifier).execution_options(populate_existing=True))
-    if (row.version if row else 0) != data.expectedVersion:
-        raise HTTPException(409, 'Operator profile version changed')
-    if not row:
-        row = Profile(tenant_id=tenant, user_id=identifier, version=0)
-        session.add(row)
-    # Existing nonterminal assignments must remain valid.
-    shifts = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == row.id, Shift.status.in_(['PLANNED', 'ACTIVE'])))) if row.id else []
-    if any((utc(s.planned_end)-utc(s.planned_start)).total_seconds() > data.maxConsecutiveHours*3600 or not set(s.required_certifications) <= set(data.certifications) for s in shifts):
-        raise HTTPException(409, 'Profile changes invalidate an open shift')
-    history = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == row.id, Shift.status != 'CANCELLED'))) if row.id else []
-    for shift in shifts:
-        consecutive_limit([(utc(s.planned_start), utc(s.planned_end)) for s in history], data.maxConsecutiveHours,
-            (utc(shift.planned_start), utc(shift.planned_end)))
-    row.target_picks_per_hour, row.max_hours, row.certifications = data.targetPicksPerHour, data.maxConsecutiveHours, data.certifications
-    row.version += 1
-    return row
-
-async def _mutate_shift(session, tenant, data, now):
-    profile = await owned(session, Profile, tenant, data.operatorId)
-    await eligible(session, tenant, profile)
-    if data.endTime <= data.startTime or data.endTime <= now or (data.endTime-data.startTime).total_seconds() > profile.max_hours*3600:
-        raise HTTPException(400, 'Shift interval is invalid or exceeds the operator limit')
-    if not set(data.requiredCertifications) <= set(profile.certifications):
-        raise HTTPException(409, 'Operator lacks required certifications')
-    overlap = await session.scalar(select(Shift.id).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id,
-        Shift.status != 'CANCELLED', Shift.planned_start < data.endTime, Shift.planned_end > data.startTime))
-    if overlap:
-        raise HTTPException(409, 'Operator already has an overlapping shift')
-    existing = await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id, Shift.status != 'CANCELLED'))
-    consecutive_limit([(utc(s.planned_start), utc(s.planned_end)) for s in existing] + [(data.startTime, data.endTime)], profile.max_hours, (data.startTime, data.endTime))
-    row = Shift(tenant_id=tenant, operator_id=profile.id, planned_start=data.startTime, planned_end=data.endTime,
-        location_id=data.locationId, required_certifications=data.requiredCertifications, status='PLANNED', version=0)
-    session.add(row)
-    return row, profile
-
-async def _mutate_transition(session, tenant, operation, target, profile, data, now):
-    row = target
-    if row.version != data.expectedVersion:
-        raise HTTPException(409, 'Shift version changed')
-    required = 'PLANNED' if operation in ('start', 'cancel') else 'ACTIVE'
-    if row.status != required:
-        raise HTTPException(409, 'Invalid shift transition')
-    if operation == 'start':
-        if not utc(row.planned_start) <= now < utc(row.planned_end):
-            raise HTTPException(409, 'Shift can only start within its planned interval')
-        if not set(row.required_certifications) <= set(profile.certifications):
-            raise HTTPException(409, 'Operator lacks required certifications')
-        if await session.scalar(select(Shift.id).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id, Shift.status == 'ACTIVE')):
-            raise HTTPException(409, 'Operator already has an active shift')
-        row.status, row.started_at = 'ACTIVE', now
-    elif operation == 'complete':
-        row.status, row.ended_at = 'COMPLETED', now
-    else:
-        row.status = 'CANCELLED'
-    row.version += 1
-    return row
-
-async def _mutate_task(session, tenant, target, profile, data, now):
-    if target.status != 'ACTIVE':
-        raise HTTPException(409, 'Activities require an active shift')
-    if data.durationSeconds > profile.max_hours*3600:
-        raise HTTPException(400, 'Reported activity duration exceeds the operator limit')
-    recorded_seconds = await session.scalar(select(func.coalesce(func.sum(Task.duration_seconds), 0)).where(Task.tenant_id == tenant, Task.shift_id == target.id))
-    if recorded_seconds + data.durationSeconds > (utc(target.planned_end)-utc(target.planned_start)).total_seconds():
-        raise HTTPException(409, 'Reported activities exceed the planned shift duration')
-    accurate, total = 0, 0
-    if data.kind == 'PICK':
-        source = await owned(session, Movement, tenant, data.sourceId)
-        if source.actor_id != profile.user_id or source.location_id != target.location_id or source.operation not in ('dispatch', 'fulfill-allocation', 'serial-sell', 'kit-sale-component') or utc(source.occurred_at) < utc(target.started_at):
-            raise HTTPException(409, 'Pick source does not belong to this operator shift')
-    else:
-        source = await owned(session, Count, tenant, data.sourceId)
-        if source.assigned_operator_id != profile.user_id or source.location_id != target.location_id or source.status != 'COMPLETED':
-            raise HTTPException(409, 'Count source must be completed and assigned to this operator')
-        lines = list(await session.scalars(select(Line).where(Line.record_id == source.id)))
-        if not lines:
-            raise HTTPException(409, 'Count has no complete observations')
-        # Bolt Optimization: Single-pass list aggregation
-        # Impact: Replaces any() and sum() generator comprehensions with a single pass
-        accurate = 0
-        total = len(lines)
-        for l in lines:
-            if l.counted_quantity is None:
-                raise HTTPException(409, 'Count has no complete observations')
-            if l.counted_quantity == l.expected_quantity:
-                accurate += 1
-    if await session.scalar(select(Task.id).where(Task.tenant_id == tenant, Task.kind == data.kind, Task.source_id == data.sourceId)):
-        raise HTTPException(409, 'Activity source has already been recorded')
-    row = Task(tenant_id=tenant, shift_id=target.id, kind=data.kind, source_id=source.id,
-        movement_id=source.id if data.kind == 'PICK' else None, count_id=source.id if data.kind == 'COUNT' else None,
-        duration_seconds=data.durationSeconds, distance_meters=data.traversalDistanceMeters,
-        accurate_lines=accurate, total_lines=total, created_at=now)
-    session.add(row)
-    return row
-
-async def _mutate_plan(session, tenant, data, now):
-    if data.targetDate < now.date():
-        raise HTTPException(400, 'Staffing plans require a current or future date')
-    recommendation = PredictiveSchedulingEngine().generate_staffing_recommendation(data.targetDate,
-        data.projectedInboundVolume, data.projectedOutboundVolume, data.averageOperatorTargetPicks, data.shiftDurationHours)
-    inputs = data.model_dump(mode='json', exclude={'mutationId', 'reason', 'tenantId', 'targetDate'})
-    available = await capacity(session, tenant, inputs)
-    row = Plan(tenant_id=tenant, target_date=data.targetDate.isoformat(), inputs=inputs,
-        recommendation={'recommendedHeadcount': recommendation.recommended_headcount, 'eligibleOperatorCount': available,
-            'shortfall': max(0, recommendation.recommended_headcount-available), 'method': 'EXPLICIT_VOLUME_HEURISTIC'}, status='DRAFT', version=0)
-    session.add(row)
-    return row
-
-async def _mutate_publish(session, tenant, target, data, now):
-    row = target
-    if row.version != data.expectedVersion or row.status != 'DRAFT':
-        raise HTTPException(409, 'Staffing plan is no longer this draft version')
-    if date.fromisoformat(row.target_date) < now.date():
-        raise HTTPException(409, 'Staffing date has passed')
-    available = await capacity(session, tenant, row.inputs)
-    row.recommendation = {**row.recommendation, 'eligibleOperatorCount': available,
-        'shortfall': max(0, row.recommendation['recommendedHeadcount']-available)}
-    row.status, row.version = 'PUBLISHED', row.version + 1
-    return row
-
 async def mutate(session, request, data, operation, identifier=None):
     tenant, actor = current_tenant(request), request.state.user_id
     fingerprint = {'operation': operation, 'id': identifier, **data.model_dump(mode='json')}
@@ -285,17 +161,117 @@ async def mutate(session, request, data, operation, identifier=None):
             return result
         now = await session.run_sync(lambda sync: database_now(sync.connection()))
         if operation == 'profile':
-            row = await _mutate_profile(session, tenant, identifier, target, data)
+            if not target.is_active or target.role != 'WAREHOUSE_OPERATOR':
+                raise HTTPException(409, 'Profiles require an active warehouse operator')
+            row = await session.scalar(select(Profile).where(Profile.tenant_id == tenant, Profile.user_id == identifier).execution_options(populate_existing=True))
+            if (row.version if row else 0) != data.expectedVersion:
+                raise HTTPException(409, 'Operator profile version changed')
+            if not row:
+                row = Profile(tenant_id=tenant, user_id=identifier, version=0)
+                session.add(row)
+            # Existing nonterminal assignments must remain valid.
+            shifts = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == row.id, Shift.status.in_(['PLANNED', 'ACTIVE'])))) if row.id else []
+            if any((utc(s.planned_end)-utc(s.planned_start)).total_seconds() > data.maxConsecutiveHours*3600 or not set(s.required_certifications) <= set(data.certifications) for s in shifts):
+                raise HTTPException(409, 'Profile changes invalidate an open shift')
+            history = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == row.id, Shift.status != 'CANCELLED'))) if row.id else []
+            for shift in shifts:
+                consecutive_limit([(utc(s.planned_start), utc(s.planned_end)) for s in history], data.maxConsecutiveHours,
+                    (utc(shift.planned_start), utc(shift.planned_end)))
+            row.target_picks_per_hour, row.max_hours, row.certifications = data.targetPicksPerHour, data.maxConsecutiveHours, data.certifications
+            row.version += 1
         elif operation == 'shift':
-            row, profile = await _mutate_shift(session, tenant, data, now)
+            profile = await owned(session, Profile, tenant, data.operatorId)
+            await eligible(session, tenant, profile)
+            if data.endTime <= data.startTime or data.endTime <= now or (data.endTime-data.startTime).total_seconds() > profile.max_hours*3600:
+                raise HTTPException(400, 'Shift interval is invalid or exceeds the operator limit')
+            if not set(data.requiredCertifications) <= set(profile.certifications):
+                raise HTTPException(409, 'Operator lacks required certifications')
+            overlap = await session.scalar(select(Shift.id).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id,
+                Shift.status != 'CANCELLED', Shift.planned_start < data.endTime, Shift.planned_end > data.startTime))
+            if overlap:
+                raise HTTPException(409, 'Operator already has an overlapping shift')
+            existing = await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id, Shift.status != 'CANCELLED'))
+            consecutive_limit([(utc(s.planned_start), utc(s.planned_end)) for s in existing] + [(data.startTime, data.endTime)], profile.max_hours, (data.startTime, data.endTime))
+            row = Shift(tenant_id=tenant, operator_id=profile.id, planned_start=data.startTime, planned_end=data.endTime,
+                location_id=data.locationId, required_certifications=data.requiredCertifications, status='PLANNED', version=0)
+            session.add(row)
         elif operation in ('start', 'complete', 'cancel'):
-            row = await _mutate_transition(session, tenant, operation, target, profile, data, now)
+            row = target
+            if row.version != data.expectedVersion:
+                raise HTTPException(409, 'Shift version changed')
+            required = 'PLANNED' if operation in ('start', 'cancel') else 'ACTIVE'
+            if row.status != required:
+                raise HTTPException(409, 'Invalid shift transition')
+            if operation == 'start':
+                if not utc(row.planned_start) <= now < utc(row.planned_end):
+                    raise HTTPException(409, 'Shift can only start within its planned interval')
+                if not set(row.required_certifications) <= set(profile.certifications):
+                    raise HTTPException(409, 'Operator lacks required certifications')
+                if await session.scalar(select(Shift.id).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id, Shift.status == 'ACTIVE')):
+                    raise HTTPException(409, 'Operator already has an active shift')
+                row.status, row.started_at = 'ACTIVE', now
+            elif operation == 'complete':
+                row.status, row.ended_at = 'COMPLETED', now
+            else:
+                row.status = 'CANCELLED'
+            row.version += 1
         elif operation == 'task':
-            row = await _mutate_task(session, tenant, target, profile, data, now)
+            if target.status != 'ACTIVE':
+                raise HTTPException(409, 'Activities require an active shift')
+            if data.durationSeconds > profile.max_hours*3600:
+                raise HTTPException(400, 'Reported activity duration exceeds the operator limit')
+            recorded_seconds = await session.scalar(select(func.coalesce(func.sum(Task.duration_seconds), 0)).where(Task.tenant_id == tenant, Task.shift_id == target.id))
+            if recorded_seconds + data.durationSeconds > (utc(target.planned_end)-utc(target.planned_start)).total_seconds():
+                raise HTTPException(409, 'Reported activities exceed the planned shift duration')
+            accurate, total = 0, 0
+            if data.kind == 'PICK':
+                source = await owned(session, Movement, tenant, data.sourceId)
+                if source.actor_id != profile.user_id or source.location_id != target.location_id or source.operation not in ('dispatch', 'fulfill-allocation', 'serial-sell', 'kit-sale-component') or utc(source.occurred_at) < utc(target.started_at):
+                    raise HTTPException(409, 'Pick source does not belong to this operator shift')
+            else:
+                source = await owned(session, Count, tenant, data.sourceId)
+                if source.assigned_operator_id != profile.user_id or source.location_id != target.location_id or source.status != 'COMPLETED':
+                    raise HTTPException(409, 'Count source must be completed and assigned to this operator')
+                lines = list(await session.scalars(select(Line).where(Line.record_id == source.id)))
+                if not lines:
+                    raise HTTPException(409, 'Count has no complete observations')
+                # Bolt Optimization: Single-pass list aggregation
+                # Impact: Replaces any() and sum() generator comprehensions with a single pass
+                accurate = 0
+                total = len(lines)
+                for l in lines:
+                    if l.counted_quantity is None:
+                        raise HTTPException(409, 'Count has no complete observations')
+                    if l.counted_quantity == l.expected_quantity:
+                        accurate += 1
+            if await session.scalar(select(Task.id).where(Task.tenant_id == tenant, Task.kind == data.kind, Task.source_id == data.sourceId)):
+                raise HTTPException(409, 'Activity source has already been recorded')
+            row = Task(tenant_id=tenant, shift_id=target.id, kind=data.kind, source_id=source.id,
+                movement_id=source.id if data.kind == 'PICK' else None, count_id=source.id if data.kind == 'COUNT' else None,
+                duration_seconds=data.durationSeconds, distance_meters=data.traversalDistanceMeters,
+                accurate_lines=accurate, total_lines=total, created_at=now)
+            session.add(row)
         elif operation == 'plan':
-            row = await _mutate_plan(session, tenant, data, now)
+            if data.targetDate < now.date():
+                raise HTTPException(400, 'Staffing plans require a current or future date')
+            recommendation = PredictiveSchedulingEngine().generate_staffing_recommendation(data.targetDate,
+                data.projectedInboundVolume, data.projectedOutboundVolume, data.averageOperatorTargetPicks, data.shiftDurationHours)
+            inputs = data.model_dump(mode='json', exclude={'mutationId', 'reason', 'tenantId', 'targetDate'})
+            available = await capacity(session, tenant, inputs)
+            row = Plan(tenant_id=tenant, target_date=data.targetDate.isoformat(), inputs=inputs,
+                recommendation={'recommendedHeadcount': recommendation.recommended_headcount, 'eligibleOperatorCount': available,
+                    'shortfall': max(0, recommendation.recommended_headcount-available), 'method': 'EXPLICIT_VOLUME_HEURISTIC'}, status='DRAFT', version=0)
+            session.add(row)
         else:
-            row = await _mutate_publish(session, tenant, target, data, now)
+            row = target
+            if row.version != data.expectedVersion or row.status != 'DRAFT':
+                raise HTTPException(409, 'Staffing plan is no longer this draft version')
+            if date.fromisoformat(row.target_date) < now.date():
+                raise HTTPException(409, 'Staffing date has passed')
+            available = await capacity(session, tenant, row.inputs)
+            row.recommendation = {**row.recommendation, 'eligibleOperatorCount': available,
+                'shortfall': max(0, row.recommendation['recommendedHeadcount']-available)}
+            row.status, row.version = 'PUBLISHED', row.version + 1
         await session.flush()
         result = dto(row)
         if operation in ('shift', 'cancel'):
@@ -339,101 +315,306 @@ async def summary(session, tenant, profile, start, end):
             else:
                 distance_complete = False
 
-    return {'recordedPickTasks': pick_count, 'reportedPickSeconds': seconds,
-        'picksPerReportedHour': pick_count*3600/seconds if seconds else None,
-        'countAccuracyPercent': accurate*100/total if total else None, 'countLines': total,
-        'traversalDistanceMeters': distance_meters if distance_complete else None,
+    return {
+        'recordedPickTasks': pick_count,
+        'reportedPickSeconds': seconds,
+        'picksPerReportedHour': (
+            pick_count * 3600 / seconds if seconds else None
+        ),
+        'countAccuracyPercent': (
+            accurate * 100 / total if total else None
+        ),
+        'countLines': total,
+        'traversalDistanceMeters': (
+            distance_meters if distance_complete else None
+        ),
         'distanceComplete': distance_complete,
-        'timingSource': 'OPERATOR_REPORTED', 'from': start.isoformat(), 'toExclusive': end.isoformat()}
+        'timingSource': 'OPERATOR_REPORTED',
+        'from': start.isoformat(),
+        'toExclusive': end.isoformat(),
+    }
+
 
 @router.get('/me')
-async def me(request: Request, days: int = Query(ge=1, le=31, default=1), session: AsyncSession = Depends(get_db_session)):
+async def me(
+    request: Request,
+    days: int = Query(ge=1, le=31, default=1),
+    session: AsyncSession = Depends(get_db_session),
+):
     tenant = current_tenant(request)
-    profile = await session.scalar(select(Profile).where(Profile.tenant_id == tenant, Profile.user_id == request.state.user_id))
-    now = await session.run_sync(lambda sync: database_now(sync.connection()))
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)-timedelta(days=days-1)
-    end = now.replace(hour=0, minute=0, second=0, microsecond=0)+timedelta(days=1)
-    shifts = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id).order_by(Shift.planned_start.desc()).limit(100))) if profile else []
-    return {'profile': dto(profile) if profile else None, 'shifts': [dto(s) for s in shifts],
-        'metrics': await summary(session, tenant, profile, start, end) if profile else None}
+    profile = await session.scalar(
+        select(Profile).where(
+            Profile.tenant_id == tenant,
+            Profile.user_id == request.state.user_id,
+        )
+    )
+    now = await session.run_sync(
+        lambda sync: database_now(sync.connection())
+    )
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = day_start - timedelta(days=days - 1)
+    end = day_start + timedelta(days=1)
+    shifts = (
+        list(
+            await session.scalars(
+                select(Shift)
+                .where(
+                    Shift.tenant_id == tenant,
+                    Shift.operator_id == profile.id,
+                )
+                .order_by(Shift.planned_start.desc())
+                .limit(100)
+            )
+        )
+        if profile
+        else []
+    )
+    metrics = (
+        await summary(session, tenant, profile, start, end)
+        if profile
+        else None
+    )
+    return {
+        'profile': dto(profile) if profile else None,
+        'shifts': [dto(s) for s in shifts],
+        'metrics': metrics,
+    }
+
 
 @router.get('/operators')
-async def operators(request: Request, session: AsyncSession = Depends(get_db_session)):
+async def operators(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     tenant = current_tenant(request)
-    rows = await session.execute(select(UserModel, Profile).outerjoin(Profile, (Profile.user_id == UserModel.id) & (Profile.tenant_id == tenant)).where(
-        UserModel.tenant_id == tenant, UserModel.role == 'WAREHOUSE_OPERATOR', UserModel.is_active.is_(True)).order_by(UserModel.name).limit(1000))
-    return [{'userId': user.id, 'name': user.name, 'profile': dto(p) if p else None} for user, p in rows]
+    stmt = (
+        select(UserModel, Profile)
+        .outerjoin(
+            Profile,
+            (Profile.user_id == UserModel.id)
+            & (Profile.tenant_id == tenant),
+        )
+        .where(
+            UserModel.tenant_id == tenant,
+            UserModel.role == 'WAREHOUSE_OPERATOR',
+            UserModel.is_active.is_(True),
+        )
+        .order_by(UserModel.name)
+        .limit(1000)
+    )
+    rows = await session.execute(stmt)
+    return [
+        {
+            'userId': user.id,
+            'name': user.name,
+            'profile': dto(p) if p else None,
+        }
+        for user, p in rows
+    ]
+
 
 @router.get('/operators/{identifier}/metrics')
-async def operator_metrics(identifier: str, request: Request, days: int = Query(default=1, ge=1, le=31), session: AsyncSession = Depends(get_db_session)):
+async def operator_metrics(
+    identifier: str,
+    request: Request,
+    days: int = Query(default=1, ge=1, le=31),
+    session: AsyncSession = Depends(get_db_session),
+):
     tenant = current_tenant(request)
     profile = await owned(session, Profile, tenant, identifier)
-    now = await session.run_sync(lambda sync: database_now(sync.connection()))
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)-timedelta(days=days-1)
-    end = now.replace(hour=0, minute=0, second=0, microsecond=0)+timedelta(days=1)
+    now = await session.run_sync(
+        lambda sync: database_now(sync.connection())
+    )
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = day_start - timedelta(days=days - 1)
+    end = day_start + timedelta(days=1)
     return await summary(session, tenant, profile, start, end)
 
+
 @router.get('/shifts')
-async def shifts(request: Request, session: AsyncSession = Depends(get_db_session)):
-    query = select(Shift).where(Shift.tenant_id == current_tenant(request))
+async def shifts(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    tenant = current_tenant(request)
+    query = select(Shift).where(Shift.tenant_id == tenant)
     if not manager(request):
-        query = query.join(Profile, Profile.id == Shift.operator_id).where(Profile.user_id == request.state.user_id, Profile.tenant_id == current_tenant(request))
-    return [dto(s) for s in await session.scalars(query.order_by(Shift.planned_start.desc()).limit(1000))]
+        query = query.join(
+            Profile, Profile.id == Shift.operator_id
+        ).where(
+            Profile.user_id == request.state.user_id,
+            Profile.tenant_id == tenant,
+        )
+    rows = await session.scalars(
+        query.order_by(Shift.planned_start.desc()).limit(1000)
+    )
+    return [dto(s) for s in rows]
+
 
 @router.get('/shifts/{identifier}/activities')
-async def activities(identifier: str, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def activities(
+    identifier: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     shift = await owned(session, Shift, current_tenant(request), identifier)
     await scope(session, request, shift)
-    return [dto(t) for t in await session.scalars(select(Task).where(Task.tenant_id == shift.tenant_id, Task.shift_id == shift.id).order_by(Task.created_at).limit(1000))]
+    rows = await session.scalars(
+        select(Task)
+        .where(
+            Task.tenant_id == shift.tenant_id,
+            Task.shift_id == shift.id,
+        )
+        .order_by(Task.created_at)
+        .limit(1000)
+    )
+    return [dto(t) for t in rows]
+
 
 @router.get('/shifts/{identifier}/sources')
-async def activity_sources(identifier: str, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def activity_sources(
+    identifier: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     tenant = current_tenant(request)
     shift = await owned(session, Shift, tenant, identifier)
     profile = await scope(session, request, shift)
     if shift.status != 'ACTIVE':
         return []
     recorded = select(Task.source_id).where(Task.tenant_id == tenant)
-    picks = await session.scalars(select(Movement).where(Movement.tenant_id == tenant, Movement.actor_id == profile.user_id,
-        Movement.location_id == shift.location_id, Movement.occurred_at >= shift.started_at,
-        Movement.operation.in_(['dispatch', 'fulfill-allocation', 'serial-sell', 'kit-sale-component']), ~Movement.id.in_(recorded)).order_by(Movement.occurred_at.desc()).limit(1000))
-    counts = await session.scalars(select(Count).where(Count.tenant_id == tenant, Count.assigned_operator_id == profile.user_id,
-        Count.location_id == shift.location_id, Count.status == 'COMPLETED', ~Count.id.in_(recorded)).order_by(Count.created_at.desc()).limit(1000))
-    return [{'id': p.id, 'kind': 'PICK', 'label': p.sku + ' · ' + p.operation} for p in picks] + [
-        {'id': c.id, 'kind': 'COUNT', 'label': c.name} for c in counts]
+    ops = [
+        'dispatch',
+        'fulfill-allocation',
+        'serial-sell',
+        'kit-sale-component',
+    ]
+    picks = await session.scalars(
+        select(Movement)
+        .where(
+            Movement.tenant_id == tenant,
+            Movement.actor_id == profile.user_id,
+            Movement.location_id == shift.location_id,
+            Movement.occurred_at >= shift.started_at,
+            Movement.operation.in_(ops),
+            ~Movement.id.in_(recorded),
+        )
+        .order_by(Movement.occurred_at.desc())
+        .limit(1000)
+    )
+    counts = await session.scalars(
+        select(Count)
+        .where(
+            Count.tenant_id == tenant,
+            Count.assigned_operator_id == profile.user_id,
+            Count.location_id == shift.location_id,
+            Count.status == 'COMPLETED',
+            ~Count.id.in_(recorded),
+        )
+        .order_by(Count.created_at.desc())
+        .limit(1000)
+    )
+    pick_items = [
+        {
+            'id': p.id,
+            'kind': 'PICK',
+            'label': p.sku + ' · ' + p.operation,
+        }
+        for p in picks
+    ]
+    count_items = [
+        {'id': c.id, 'kind': 'COUNT', 'label': c.name} for c in counts
+    ]
+    return pick_items + count_items
+
 
 @router.get('/plans')
-async def plans(request: Request, session: AsyncSession = Depends(get_db_session)):
-    return [dto(p) for p in await session.scalars(select(Plan).where(Plan.tenant_id == current_tenant(request)).order_by(Plan.target_date.desc()).limit(1000))]
+async def plans(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    rows = await session.scalars(
+        select(Plan)
+        .where(Plan.tenant_id == current_tenant(request))
+        .order_by(Plan.target_date.desc())
+        .limit(1000)
+    )
+    return [dto(p) for p in rows]
+
 
 @router.put('/profiles/{identifier}')
-async def profile(identifier: str, data: ProfileCommand, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def profile(
+    identifier: str,
+    data: ProfileCommand,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'profile', identifier)
 
+
 @router.post('/shifts')
-async def create_shift(data: ShiftCommand, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def create_shift(
+    data: ShiftCommand,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'shift')
 
+
 @router.post('/shifts/{identifier}/start')
-async def start_shift(identifier: str, data: Versioned, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def start_shift(
+    identifier: str,
+    data: Versioned,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'start', identifier)
 
+
 @router.post('/shifts/{identifier}/complete')
-async def complete_shift(identifier: str, data: Versioned, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def complete_shift(
+    identifier: str,
+    data: Versioned,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'complete', identifier)
 
+
 @router.post('/shifts/{identifier}/cancel')
-async def cancel_shift(identifier: str, data: Versioned, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def cancel_shift(
+    identifier: str,
+    data: Versioned,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'cancel', identifier)
 
+
 @router.post('/shifts/{identifier}/activities')
-async def log_activity(identifier: str, data: TaskCommand, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def log_activity(
+    identifier: str,
+    data: TaskCommand,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'task', identifier)
 
+
 @router.post('/plans')
-async def create_plan(data: PlanCommand, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def create_plan(
+    data: PlanCommand,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'plan')
 
+
 @router.post('/plans/{identifier}/publish')
-async def publish_plan(identifier: str, data: Versioned, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def publish_plan(
+    identifier: str,
+    data: Versioned,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'publish', identifier)
