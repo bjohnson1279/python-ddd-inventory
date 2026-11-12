@@ -174,6 +174,8 @@ app.include_router(offline_sync_router)
 publisher = KafkaPublisher()
 worker = OutboxWorker(publisher)
 
+import asyncio
+
 @app.on_event('startup')
 async def startup_event():
     await publisher.start()
