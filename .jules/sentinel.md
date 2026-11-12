@@ -185,3 +185,8 @@ Prevention: Validate presence of required infrastructure configuration elements 
 **Vulnerability:** The `generate_graphql_schema` function in `src/presentation/graphql.py` accepted an arbitrary `filepath` parameter without validation, leading to potential path traversal and arbitrary file writes outside the intended directory.
 **Learning:** When using user-supplied parameters to construct file paths for writing data, it's not enough to rely on defaults. If the function is ever exposed or reused, an attacker could supply inputs like `../../../etc/passwd`. Validation must be strict.
 **Prevention:** Always validate file path inputs using `os.path.basename(filepath)` and reject any input containing directory separators or traversal characters (e.g., `..`). Check against strict alphanumeric or allowlist patterns where applicable (e.g. `.isalnum()`).
+
+## 2026-10-11 - Timing Attack Vulnerability in Hash Comparison
+**Vulnerability:** Using standard equality comparison (`!=`) between the calculated hash of the integration signing secret and the stored `row.secret_digest` in `src/application/integration_service.py` exposed the check to timing side-channel attacks.
+**Learning:** Python's default string comparison operators short-circuit on the first mismatched byte, creating measurable execution time differences that attackers can leverage to infer digest values.
+**Prevention:** Always use constant-time comparison utilities such as `hmac.compare_digest` when comparing cryptographic hashes, digests, signatures, or secret tokens.

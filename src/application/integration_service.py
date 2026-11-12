@@ -100,7 +100,7 @@ async def ingest(session, tenant, connection_id, raw, headers):
         await session.rollback()
         return {'status': 'PING_ONLY'}
     secret = setting(row.secret_ref, secret=True).encode()
-    if hashlib.sha256(secret).hexdigest() != row.secret_digest:
+    if not hmac.compare_digest(hashlib.sha256(secret).hexdigest(), row.secret_digest):
         raise PermissionError('Connection signing key changed; register its replacement explicitly')
     if row.provider == 'SHOPIFY':
         signature, delivery = headers.get('x-shopify-hmac-sha256'), headers.get('x-shopify-webhook-id')

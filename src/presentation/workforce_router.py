@@ -315,101 +315,306 @@ async def summary(session, tenant, profile, start, end):
             else:
                 distance_complete = False
 
-    return {'recordedPickTasks': pick_count, 'reportedPickSeconds': seconds,
-        'picksPerReportedHour': pick_count*3600/seconds if seconds else None,
-        'countAccuracyPercent': accurate*100/total if total else None, 'countLines': total,
-        'traversalDistanceMeters': distance_meters if distance_complete else None,
+    return {
+        'recordedPickTasks': pick_count,
+        'reportedPickSeconds': seconds,
+        'picksPerReportedHour': (
+            pick_count * 3600 / seconds if seconds else None
+        ),
+        'countAccuracyPercent': (
+            accurate * 100 / total if total else None
+        ),
+        'countLines': total,
+        'traversalDistanceMeters': (
+            distance_meters if distance_complete else None
+        ),
         'distanceComplete': distance_complete,
-        'timingSource': 'OPERATOR_REPORTED', 'from': start.isoformat(), 'toExclusive': end.isoformat()}
+        'timingSource': 'OPERATOR_REPORTED',
+        'from': start.isoformat(),
+        'toExclusive': end.isoformat(),
+    }
+
 
 @router.get('/me')
-async def me(request: Request, days: int = Query(ge=1, le=31, default=1), session: AsyncSession = Depends(get_db_session)):
+async def me(
+    request: Request,
+    days: int = Query(ge=1, le=31, default=1),
+    session: AsyncSession = Depends(get_db_session),
+):
     tenant = current_tenant(request)
-    profile = await session.scalar(select(Profile).where(Profile.tenant_id == tenant, Profile.user_id == request.state.user_id))
-    now = await session.run_sync(lambda sync: database_now(sync.connection()))
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)-timedelta(days=days-1)
-    end = now.replace(hour=0, minute=0, second=0, microsecond=0)+timedelta(days=1)
-    shifts = list(await session.scalars(select(Shift).where(Shift.tenant_id == tenant, Shift.operator_id == profile.id).order_by(Shift.planned_start.desc()).limit(100))) if profile else []
-    return {'profile': dto(profile) if profile else None, 'shifts': [dto(s) for s in shifts],
-        'metrics': await summary(session, tenant, profile, start, end) if profile else None}
+    profile = await session.scalar(
+        select(Profile).where(
+            Profile.tenant_id == tenant,
+            Profile.user_id == request.state.user_id,
+        )
+    )
+    now = await session.run_sync(
+        lambda sync: database_now(sync.connection())
+    )
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = day_start - timedelta(days=days - 1)
+    end = day_start + timedelta(days=1)
+    shifts = (
+        list(
+            await session.scalars(
+                select(Shift)
+                .where(
+                    Shift.tenant_id == tenant,
+                    Shift.operator_id == profile.id,
+                )
+                .order_by(Shift.planned_start.desc())
+                .limit(100)
+            )
+        )
+        if profile
+        else []
+    )
+    metrics = (
+        await summary(session, tenant, profile, start, end)
+        if profile
+        else None
+    )
+    return {
+        'profile': dto(profile) if profile else None,
+        'shifts': [dto(s) for s in shifts],
+        'metrics': metrics,
+    }
+
 
 @router.get('/operators')
-async def operators(request: Request, session: AsyncSession = Depends(get_db_session)):
+async def operators(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     tenant = current_tenant(request)
-    rows = await session.execute(select(UserModel, Profile).outerjoin(Profile, (Profile.user_id == UserModel.id) & (Profile.tenant_id == tenant)).where(
-        UserModel.tenant_id == tenant, UserModel.role == 'WAREHOUSE_OPERATOR', UserModel.is_active.is_(True)).order_by(UserModel.name).limit(1000))
-    return [{'userId': user.id, 'name': user.name, 'profile': dto(p) if p else None} for user, p in rows]
+    stmt = (
+        select(UserModel, Profile)
+        .outerjoin(
+            Profile,
+            (Profile.user_id == UserModel.id)
+            & (Profile.tenant_id == tenant),
+        )
+        .where(
+            UserModel.tenant_id == tenant,
+            UserModel.role == 'WAREHOUSE_OPERATOR',
+            UserModel.is_active.is_(True),
+        )
+        .order_by(UserModel.name)
+        .limit(1000)
+    )
+    rows = await session.execute(stmt)
+    return [
+        {
+            'userId': user.id,
+            'name': user.name,
+            'profile': dto(p) if p else None,
+        }
+        for user, p in rows
+    ]
+
 
 @router.get('/operators/{identifier}/metrics')
-async def operator_metrics(identifier: str, request: Request, days: int = Query(default=1, ge=1, le=31), session: AsyncSession = Depends(get_db_session)):
+async def operator_metrics(
+    identifier: str,
+    request: Request,
+    days: int = Query(default=1, ge=1, le=31),
+    session: AsyncSession = Depends(get_db_session),
+):
     tenant = current_tenant(request)
     profile = await owned(session, Profile, tenant, identifier)
-    now = await session.run_sync(lambda sync: database_now(sync.connection()))
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)-timedelta(days=days-1)
-    end = now.replace(hour=0, minute=0, second=0, microsecond=0)+timedelta(days=1)
+    now = await session.run_sync(
+        lambda sync: database_now(sync.connection())
+    )
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = day_start - timedelta(days=days - 1)
+    end = day_start + timedelta(days=1)
     return await summary(session, tenant, profile, start, end)
 
+
 @router.get('/shifts')
-async def shifts(request: Request, session: AsyncSession = Depends(get_db_session)):
-    query = select(Shift).where(Shift.tenant_id == current_tenant(request))
+async def shifts(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    tenant = current_tenant(request)
+    query = select(Shift).where(Shift.tenant_id == tenant)
     if not manager(request):
-        query = query.join(Profile, Profile.id == Shift.operator_id).where(Profile.user_id == request.state.user_id, Profile.tenant_id == current_tenant(request))
-    return [dto(s) for s in await session.scalars(query.order_by(Shift.planned_start.desc()).limit(1000))]
+        query = query.join(
+            Profile, Profile.id == Shift.operator_id
+        ).where(
+            Profile.user_id == request.state.user_id,
+            Profile.tenant_id == tenant,
+        )
+    rows = await session.scalars(
+        query.order_by(Shift.planned_start.desc()).limit(1000)
+    )
+    return [dto(s) for s in rows]
+
 
 @router.get('/shifts/{identifier}/activities')
-async def activities(identifier: str, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def activities(
+    identifier: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     shift = await owned(session, Shift, current_tenant(request), identifier)
     await scope(session, request, shift)
-    return [dto(t) for t in await session.scalars(select(Task).where(Task.tenant_id == shift.tenant_id, Task.shift_id == shift.id).order_by(Task.created_at).limit(1000))]
+    rows = await session.scalars(
+        select(Task)
+        .where(
+            Task.tenant_id == shift.tenant_id,
+            Task.shift_id == shift.id,
+        )
+        .order_by(Task.created_at)
+        .limit(1000)
+    )
+    return [dto(t) for t in rows]
+
 
 @router.get('/shifts/{identifier}/sources')
-async def activity_sources(identifier: str, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def activity_sources(
+    identifier: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     tenant = current_tenant(request)
     shift = await owned(session, Shift, tenant, identifier)
     profile = await scope(session, request, shift)
     if shift.status != 'ACTIVE':
         return []
     recorded = select(Task.source_id).where(Task.tenant_id == tenant)
-    picks = await session.scalars(select(Movement).where(Movement.tenant_id == tenant, Movement.actor_id == profile.user_id,
-        Movement.location_id == shift.location_id, Movement.occurred_at >= shift.started_at,
-        Movement.operation.in_(['dispatch', 'fulfill-allocation', 'serial-sell', 'kit-sale-component']), ~Movement.id.in_(recorded)).order_by(Movement.occurred_at.desc()).limit(1000))
-    counts = await session.scalars(select(Count).where(Count.tenant_id == tenant, Count.assigned_operator_id == profile.user_id,
-        Count.location_id == shift.location_id, Count.status == 'COMPLETED', ~Count.id.in_(recorded)).order_by(Count.created_at.desc()).limit(1000))
-    return [{'id': p.id, 'kind': 'PICK', 'label': p.sku + ' · ' + p.operation} for p in picks] + [
-        {'id': c.id, 'kind': 'COUNT', 'label': c.name} for c in counts]
+    ops = [
+        'dispatch',
+        'fulfill-allocation',
+        'serial-sell',
+        'kit-sale-component',
+    ]
+    picks = await session.scalars(
+        select(Movement)
+        .where(
+            Movement.tenant_id == tenant,
+            Movement.actor_id == profile.user_id,
+            Movement.location_id == shift.location_id,
+            Movement.occurred_at >= shift.started_at,
+            Movement.operation.in_(ops),
+            ~Movement.id.in_(recorded),
+        )
+        .order_by(Movement.occurred_at.desc())
+        .limit(1000)
+    )
+    counts = await session.scalars(
+        select(Count)
+        .where(
+            Count.tenant_id == tenant,
+            Count.assigned_operator_id == profile.user_id,
+            Count.location_id == shift.location_id,
+            Count.status == 'COMPLETED',
+            ~Count.id.in_(recorded),
+        )
+        .order_by(Count.created_at.desc())
+        .limit(1000)
+    )
+    pick_items = [
+        {
+            'id': p.id,
+            'kind': 'PICK',
+            'label': p.sku + ' · ' + p.operation,
+        }
+        for p in picks
+    ]
+    count_items = [
+        {'id': c.id, 'kind': 'COUNT', 'label': c.name} for c in counts
+    ]
+    return pick_items + count_items
+
 
 @router.get('/plans')
-async def plans(request: Request, session: AsyncSession = Depends(get_db_session)):
-    return [dto(p) for p in await session.scalars(select(Plan).where(Plan.tenant_id == current_tenant(request)).order_by(Plan.target_date.desc()).limit(1000))]
+async def plans(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    rows = await session.scalars(
+        select(Plan)
+        .where(Plan.tenant_id == current_tenant(request))
+        .order_by(Plan.target_date.desc())
+        .limit(1000)
+    )
+    return [dto(p) for p in rows]
+
 
 @router.put('/profiles/{identifier}')
-async def profile(identifier: str, data: ProfileCommand, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def profile(
+    identifier: str,
+    data: ProfileCommand,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'profile', identifier)
 
+
 @router.post('/shifts')
-async def create_shift(data: ShiftCommand, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def create_shift(
+    data: ShiftCommand,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'shift')
 
+
 @router.post('/shifts/{identifier}/start')
-async def start_shift(identifier: str, data: Versioned, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def start_shift(
+    identifier: str,
+    data: Versioned,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'start', identifier)
 
+
 @router.post('/shifts/{identifier}/complete')
-async def complete_shift(identifier: str, data: Versioned, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def complete_shift(
+    identifier: str,
+    data: Versioned,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'complete', identifier)
 
+
 @router.post('/shifts/{identifier}/cancel')
-async def cancel_shift(identifier: str, data: Versioned, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def cancel_shift(
+    identifier: str,
+    data: Versioned,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'cancel', identifier)
 
+
 @router.post('/shifts/{identifier}/activities')
-async def log_activity(identifier: str, data: TaskCommand, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def log_activity(
+    identifier: str,
+    data: TaskCommand,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'task', identifier)
 
+
 @router.post('/plans')
-async def create_plan(data: PlanCommand, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def create_plan(
+    data: PlanCommand,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'plan')
 
+
 @router.post('/plans/{identifier}/publish')
-async def publish_plan(identifier: str, data: Versioned, request: Request, session: AsyncSession = Depends(get_db_session)):
+async def publish_plan(
+    identifier: str,
+    data: Versioned,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     return await mutate(session, request, data, 'publish', identifier)

@@ -242,3 +242,12 @@ async def test_acknowledged_but_uncommitted_delivery_reuses_the_remote_idempoten
     assert result['status'] == 'DELIVERED' and result['attempts'] == 2
     assert len(requests) == 2 and len(accepted) == 1
     assert requests[0].content == requests[1].content
+
+
+def test_webhook_rejects_mismatched_secret_digest(client, monkeypatch):
+    connection = connect(client, monkeypatch)
+    receipt(client)
+    monkeypatch.setenv('INTEGRATION_SHOP_SECRET', 'altered-signing-secret-32-characters!')
+    response = webhook(client, connection)
+    assert response.status_code == 401
+    assert 'Invalid webhook connection or signature' in response.text
