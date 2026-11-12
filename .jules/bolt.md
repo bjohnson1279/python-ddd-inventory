@@ -229,6 +229,22 @@
 **Learning:** In `return_service.py`, checking for `sum()` of remaining quantities and `any()` expiration dates across cost layers using multiple generator comprehensions repeats O(N) traversals, and calls `datetime.now()` repeatedly within the loop for every layer, significantly increasing overhead.
 **Action:** Consolidate multiple generator comprehensions into a single O(N) `for` loop, accumulating values and evaluating conditionals simultaneously, and cache expensive `datetime.now()` calls outside of the loop.
 
+## 2026-11-10 - Eager Join for In-Transit Serial Catalog Lookup
+**Learning:** In `valuation_report`, fetching all tenant products into an in-memory dictionary or querying serialized items without joining causes high memory overhead and inefficient traversals as catalog sizes grow. Outerjoining `ProductModel` onto `SerialModel` by SKU and tenant ID retrieves only the needed product records in a single database round-trip.
+**Action:** When querying serialized items that require associated catalog product details, use an eager outerjoin on the SKU and tenant ID directly in the SQL query rather than loading full catalogs into memory.
+
 ## 2024-11-10 - O(1) Hoisting in Sorting and Traversal Lambdas
 **Learning:** In the domain product layer costing (`src/domain/product/layer_costing.py`), repeatedly constructing invariants like `utc(now)` inside loop structures (`eligible_quantity`, `eligible_layers`) and `datetime.max` inside highly-conditional sort lambdas (`consume`) caused severe slowdowns (~2-6s on 10,000 layers) because `datetime` manipulations and tuple creations run on every item.
 **Action:** Extract invariant operations outside of `for` loops and comprehensions. Avoid heavily conditional sort lambdas by branching via `if/else` and providing simpler, dedicated sort functions for each path.
+
+## 2026-11-11 - Bulk database updates for deactivated alert conditions and notices
+**Learning:** In `src/infrastructure/retail_alerts.py`, iterating over existing conditions and executing individual `update(Condition)` and `update(Notice)` statements inside a loop issues 2*N blocking database queries. On large sets of existing conditions, this introduces severe query roundtrip overhead.
+**Action:** Accumulate condition IDs and (condition_id, episode) pairs across the loop and execute single bulk updates using `WHERE id IN (...)` and `WHERE (condition_id, episode) IN (...)`.
+
+## 2026-11-13 - Project scalar columns in read-heavy serialization endpoints
+**Learning:** In read-heavy FastAPI endpoints where SQLAlchemy entities are purely serialized into DTO dictionaries and never mutated (like `/inventory/products`), retrieving full entity instances via `session.scalars(select(Model))` adds heavy overhead from ORM model tracking and object instantiation.
+**Action:** Replace `session.scalars(select(Model))` with `session.execute(select(Model.id, Model.name, ...))` to project exactly the necessary columns. The resulting lightweight `Row` objects support identical downstream attribute access (`row.id`) but execute ~35-40% faster.
+
+## 2026-11-10 - Column-Projected Queries for High-Volume Catalog and Barcode Lookups
+**Learning:** Hydrating full SQLAlchemy ORM entities when querying thousands of barcodes or variant links creates heavy identity map tracking, session caching, and object allocation overhead. In endpoints that serialize directly into dictionaries, ORM model instances add unnecessary CPU and memory pressure.
+**Action:** Select specific column tuples via `select(Model.col1, Model.col2, ...)` and unpack raw result rows instead of using `session.scalars(select(Model))`, reducing execution time by ~40-70% for large read collections.

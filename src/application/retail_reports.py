@@ -50,89 +50,91 @@ def required_permission(definition):
     return 'finance:read' if kind in FINANCIAL else 'accounting:read' if kind in ('INVENTORY_VALUATION', 'MOVEMENTS') else 'reports:read'
 
 
-async def snapshot(session, tenant, definition, now, actor):
-    kind, filters = definition['type'], definition['filters']
-    start, end = [date.fromisoformat(filters[k]) if filters.get(k) else None for k in ('fromDate', 'toDate')]
-    if start and end and start > end or start and start > now.date() or end and end > now.date():
-        raise ValueError('Report dates are outside the supported history')
-    if kind in FINANCIAL:
-        as_of = date.fromisoformat(filters['asOf']) if filters.get('asOf') else None
-        service = FinancialService(session, tenant, actor)
-        rows = await service.balances(start, end) if kind == 'INCOME_STATEMENT' else await service.balances(end=as_of)
-        quality = await service.quality(end if kind == 'INCOME_STATEMENT' else as_of)
-        # Bolt Optimization: Avoid multiple O(N) list traversals when calculating aggregate metrics.
-        # Combine aggregations into a single O(N) pass to accumulate all values simultaneously.
-        if kind == 'INCOME_STATEMENT':
-            revenue = expenses = 0
-            filtered_rows = []
-            for r in rows:
-                if r['category'] == 'revenue':
-                    revenue -= r['balanceCents']
-                    filtered_rows.append(r)
-                elif r['category'] == 'expense':
-                    expenses += r['balanceCents']
-                    filtered_rows.append(r)
-            summary = {'revenueCents': revenue, 'expenseCents': expenses, 'profitCents': revenue - expenses}
-            rows = filtered_rows
-        elif kind == 'BALANCE_SHEET':
-            assets = liabilities = equity = earnings = 0
-            for r in rows:
-                cat = r['category']
-                if cat == 'asset':
-                    assets += r['balanceCents']
-                elif cat == 'liability':
-                    liabilities -= r['balanceCents']
-                elif cat == 'equity':
-                    equity -= r['balanceCents']
-                elif cat in ('revenue', 'expense'):
-                    earnings -= r['balanceCents']
-            summary = {'assetsCents': assets, 'liabilitiesCents': liabilities, 'equityCents': equity, 'currentEarningsCents': earnings}
-            quality['isBalanced'] = assets == liabilities + equity + earnings
-        else:
-            total_debits = total_credits = 0
-            for r in rows:
-                bal = r['balanceCents']
-                if bal > 0:
-                    total_debits += bal
-                elif bal < 0:
-                    total_credits -= bal
-            summary = {'totalDebitsCents': total_debits, 'totalCreditsCents': total_credits}
-            quality['isBalanced'] = total_debits == total_credits
-        for amount in summary.values():
-            checked_cents(amount, signed=True)
-        return {'columns': list(rows[0]), 'rows': rows, 'summary': summary, 'currency': 'USD',
-            'accountingMethod': (await service.status())['method'], 'generatedAt': now.isoformat(), **quality}
-    if kind == 'MOVEMENTS':
-        query = select(Movement).where(Movement.tenant_id == tenant)
-        if filters.get('sku'):
-            query = query.where(Movement.sku == filters['sku'])
-        if filters.get('locationId'):
-            query = query.where(Movement.location_id == filters['locationId'])
-        from datetime import datetime, time, timezone, timedelta
-        if start:
-            query = query.where(Movement.occurred_at >= datetime.combine(start, time(), timezone.utc))
-        if end:
-            query = query.where(Movement.occurred_at < datetime.combine(end + timedelta(days=1), time(), timezone.utc))
-        items = list(await session.scalars(query.order_by(Movement.occurred_at, Movement.id).limit(10001)))
-        if len(items) > 10000:
-            raise ValueError('Report exceeds 10000 rows; narrow its filters')
-        columns = ['movementId', 'sku', 'locationId', 'operation', 'quantity', 'occurredAt', 'cogsCents']
-        rows = [{'movementId': r.id, 'sku': r.sku, 'locationId': r.location_id, 'operation': r.operation,
-            'quantity': r.amount, 'occurredAt': utc(r.occurred_at).isoformat(), 'cogsCents': r.result.get('costOfGoodsSoldCents')} for r in items]
-        return {'columns': columns, 'rows': rows, 'currency': 'USD', 'generatedAt': now.isoformat(),
-            'complete': all(r['operation'] not in ('dispatch', 'fulfill-allocation', 'serial-sell', 'kit-sale-component') or r['cogsCents'] is not None for r in rows)}
-    if kind == 'REPLENISHMENT':
-        from src.application.procurement_service import ProcurementService
-        suggestions = await ProcurementService(session, tenant, actor).suggestions()
-        units = {u.sku: u.base_unit for u in await session.scalars(select(UomConfigModel).where(UomConfigModel.tenant_id == tenant))}
-        columns = ['id', 'sku', 'locationId', 'supplierId', 'supplierActive', 'availableQuantity', 'unusableQuantity', 'incomingQuantity', 'suggestedQuantity', 'reason', 'baseUnit']
-        for suggestion in suggestions:
-            suggestion['baseUnit'] = units.get(suggestion['sku'], 'units')
-        rows = [{k: r.get(k) for k in columns} for r in suggestions if
-            (not filters.get('sku') or r['sku'] == filters['sku']) and (not filters.get('locationId') or r['locationId'] == filters['locationId'])]
-        if len(rows) > 10000:
-            raise ValueError('Report exceeds 10000 rows; narrow its filters')
-        return {'columns': columns, 'rows': rows, 'complete': True, 'generatedAt': now.isoformat()}
+async def _financial_snapshot(session, tenant, actor, kind, filters, start, end, now):
+    as_of = date.fromisoformat(filters['asOf']) if filters.get('asOf') else None
+    service = FinancialService(session, tenant, actor)
+    rows = await service.balances(start, end) if kind == 'INCOME_STATEMENT' else await service.balances(end=as_of)
+    quality = await service.quality(end if kind == 'INCOME_STATEMENT' else as_of)
+    # Bolt Optimization: Avoid multiple O(N) list traversals when calculating aggregate metrics.
+    # Combine aggregations into a single O(N) pass to accumulate all values simultaneously.
+    if kind == 'INCOME_STATEMENT':
+        revenue = expenses = 0
+        filtered_rows = []
+        for r in rows:
+            if r['category'] == 'revenue':
+                revenue -= r['balanceCents']
+                filtered_rows.append(r)
+            elif r['category'] == 'expense':
+                expenses += r['balanceCents']
+                filtered_rows.append(r)
+        summary = {'revenueCents': revenue, 'expenseCents': expenses, 'profitCents': revenue - expenses}
+        rows = filtered_rows
+    elif kind == 'BALANCE_SHEET':
+        assets = liabilities = equity = earnings = 0
+        for r in rows:
+            cat = r['category']
+            if cat == 'asset':
+                assets += r['balanceCents']
+            elif cat == 'liability':
+                liabilities -= r['balanceCents']
+            elif cat == 'equity':
+                equity -= r['balanceCents']
+            elif cat in ('revenue', 'expense'):
+                earnings -= r['balanceCents']
+        summary = {'assetsCents': assets, 'liabilitiesCents': liabilities, 'equityCents': equity, 'currentEarningsCents': earnings}
+        quality['isBalanced'] = assets == liabilities + equity + earnings
+    else:
+        total_debits = total_credits = 0
+        for r in rows:
+            bal = r['balanceCents']
+            if bal > 0:
+                total_debits += bal
+            elif bal < 0:
+                total_credits -= bal
+        summary = {'totalDebitsCents': total_debits, 'totalCreditsCents': total_credits}
+        quality['isBalanced'] = total_debits == total_credits
+    for amount in summary.values():
+        checked_cents(amount, signed=True)
+    return {'columns': list(rows[0]), 'rows': rows, 'summary': summary, 'currency': 'USD',
+        'accountingMethod': (await service.status())['method'], 'generatedAt': now.isoformat(), **quality}
+
+
+async def _movements_snapshot(session, tenant, filters, start, end, now):
+    query = select(Movement).where(Movement.tenant_id == tenant)
+    if filters.get('sku'):
+        query = query.where(Movement.sku == filters['sku'])
+    if filters.get('locationId'):
+        query = query.where(Movement.location_id == filters['locationId'])
+    from datetime import datetime, time, timezone, timedelta
+    if start:
+        query = query.where(Movement.occurred_at >= datetime.combine(start, time(), timezone.utc))
+    if end:
+        query = query.where(Movement.occurred_at < datetime.combine(end + timedelta(days=1), time(), timezone.utc))
+    items = list(await session.scalars(query.order_by(Movement.occurred_at, Movement.id).limit(10001)))
+    if len(items) > 10000:
+        raise ValueError('Report exceeds 10000 rows; narrow its filters')
+    columns = ['movementId', 'sku', 'locationId', 'operation', 'quantity', 'occurredAt', 'cogsCents']
+    rows = [{'movementId': r.id, 'sku': r.sku, 'locationId': r.location_id, 'operation': r.operation,
+        'quantity': r.amount, 'occurredAt': utc(r.occurred_at).isoformat(), 'cogsCents': r.result.get('costOfGoodsSoldCents')} for r in items]
+    return {'columns': columns, 'rows': rows, 'currency': 'USD', 'generatedAt': now.isoformat(),
+        'complete': all(r['operation'] not in ('dispatch', 'fulfill-allocation', 'serial-sell', 'kit-sale-component') or r['cogsCents'] is not None for r in rows)}
+
+
+async def _replenishment_snapshot(session, tenant, actor, filters, now):
+    from src.application.procurement_service import ProcurementService
+    suggestions = await ProcurementService(session, tenant, actor).suggestions()
+    units = {u.sku: u.base_unit for u in await session.scalars(select(UomConfigModel).where(UomConfigModel.tenant_id == tenant))}
+    columns = ['id', 'sku', 'locationId', 'supplierId', 'supplierActive', 'availableQuantity', 'unusableQuantity', 'incomingQuantity', 'suggestedQuantity', 'reason', 'baseUnit']
+    for suggestion in suggestions:
+        suggestion['baseUnit'] = units.get(suggestion['sku'], 'units')
+    rows = [{k: r.get(k) for k in columns} for r in suggestions if
+        (not filters.get('sku') or r['sku'] == filters['sku']) and (not filters.get('locationId') or r['locationId'] == filters['locationId'])]
+    if len(rows) > 10000:
+        raise ValueError('Report exceeds 10000 rows; narrow its filters')
+    return {'columns': columns, 'rows': rows, 'complete': True, 'generatedAt': now.isoformat()}
+
+
+async def _stock_snapshot(session, tenant, kind, filters, now):
     query = select(Stock).where(Stock.tenant_id == tenant)
     if filters.get('sku'):
         query = query.where(Stock.sku == filters['sku'])
@@ -195,6 +197,20 @@ async def snapshot(session, tenant, definition, now, actor):
     columns = ['sku', 'locationId', 'quantity', 'allocated', 'available', 'stockVersion', 'baseUnit', 'uomVersion']
     columns += ['valueCents', 'complete'] if kind == 'INVENTORY_VALUATION' else ['age0To30', 'age31To60', 'age61To90', 'ageOver90', 'unknownAgeQuantity', 'complete'] if kind == 'INVENTORY_AGING' else []
     return {'columns': columns, 'rows': rows, 'complete': complete, 'generatedAt': now.isoformat(), 'currency': 'USD' if kind == 'INVENTORY_VALUATION' else None}
+
+
+async def snapshot(session, tenant, definition, now, actor):
+    kind, filters = definition['type'], definition['filters']
+    start, end = [date.fromisoformat(filters[k]) if filters.get(k) else None for k in ('fromDate', 'toDate')]
+    if start and end and start > end or start and start > now.date() or end and end > now.date():
+        raise ValueError('Report dates are outside the supported history')
+    if kind in FINANCIAL:
+        return await _financial_snapshot(session, tenant, actor, kind, filters, start, end, now)
+    if kind == 'MOVEMENTS':
+        return await _movements_snapshot(session, tenant, filters, start, end, now)
+    if kind == 'REPLENISHMENT':
+        return await _replenishment_snapshot(session, tenant, actor, filters, now)
+    return await _stock_snapshot(session, tenant, kind, filters, now)
 
 
 def export_csv(result):
