@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -50,10 +53,22 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-test.txt
 
       - name: Run Pytest Suite
-        run: pytest
+        run: pytest --cov=src --cov-branch --cov-report=term --cov-report=xml:coverage.xml --cov-report=json:coverage.json --junitxml=test-results.xml
+
+      - name: Upload python-coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: |
+            coverage.xml
+            coverage.json
+            test-results.xml
+          if-no-files-found: error
+          retention-days: 14
 
   costing-postgres:
     name: PostgreSQL costing and tenant security contracts
@@ -80,7 +95,7 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-test.txt
       - name: Verify migration, costing, tenant isolation and concurrent writes
         env:
           COSTING_TEST_DATABASE_URL: postgresql+asyncpg://postgres:costing-test-only@127.0.0.1:5432/costing_test
@@ -97,7 +112,7 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-test.txt
       - name: Start disposable Kafka broker
         run: >-
           docker run -d --name event-delivery-kafka -p 127.0.0.1:19092:9092
