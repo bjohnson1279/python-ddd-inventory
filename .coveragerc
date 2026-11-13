@@ -3,6 +3,6 @@ branch = True
 source = src
 
 [report]
-fail_under = 66
+fail_under = 71
 show_missing = True
 precision = 2
