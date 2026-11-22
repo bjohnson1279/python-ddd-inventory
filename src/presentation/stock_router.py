@@ -46,10 +46,13 @@ class StockMutationDTO(BaseModel):
 @requires_roles(['ADMIN', 'MANAGER', 'USER', 'WAREHOUSE_OPERATOR'])
 async def list_stock(request: Request, session: AsyncSession = Depends(get_db_session),
                      limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
+    tenant = current_tenant(request)
+    from src.infrastructure.conformance_models import record_cache_read
+    record_cache_read(tenant, f'inventory:list:{limit}:{offset}')
     rows = await session.scalars(select(StockModel).where(
-        StockModel.tenant_id == current_tenant(request)).order_by(StockModel.sku, StockModel.location_id)
+        StockModel.tenant_id == tenant).order_by(StockModel.sku, StockModel.location_id)
         .limit(limit).offset(offset))
-    units = {row.sku: row.base_unit for row in await session.scalars(select(UomConfigModel).where(UomConfigModel.tenant_id == current_tenant(request)))}
+    units = {row.sku: row.base_unit for row in await session.scalars(select(UomConfigModel).where(UomConfigModel.tenant_id == tenant))}
     return [{**stock_dto(row), 'baseUnit': units.get(row.sku, 'ea')} for row in rows]
 
 

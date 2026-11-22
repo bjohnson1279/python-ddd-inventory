@@ -27,6 +27,10 @@ from src.infrastructure.cost_models import AccountingConfigModel, CostLayerModel
 from src.infrastructure.procurement_models import SupplierModel, PurchaseOrderModel, ProcurementActionModel, ReorderPolicyModel, ASNModel
 from src.infrastructure.return_models import ReturnModel, ReturnActionModel, QuarantineModel
 from src.infrastructure.transfer_models import TransferModel, InventoryActionModel, UomConfigModel
+from src.infrastructure.conformance_models import (
+    ComplianceLedgerEntryModel, RfidTagModel, WarehouseLocationModel,
+    WebhookSubscriptionModel, WebhookDeliveryModel,
+)
 
 
 async def create_related(conn):
@@ -41,7 +45,9 @@ async def create_related(conn):
                   FinancialDocumentModel, DocumentSourceModel, SettlementModel, FinancialCreditModel,
                   IntegrationConnection, IntegrationOrder, IntegrationReceipt, IntegrationDelivery,
                   ReportJob, ReportSchedule, AlertConfig, AlertCondition, AlertNotice,
-                  OperatorProfile, LaborShift, TaskPerformance, StaffingPlan):
+                  OperatorProfile, LaborShift, TaskPerformance, StaffingPlan,
+                  ComplianceLedgerEntryModel, RfidTagModel, WarehouseLocationModel,
+                  WebhookSubscriptionModel, WebhookDeliveryModel):
         await conn.run_sync(lambda sync, table=model.__table__: table.create(sync, checkfirst=True))
     upgrades = {
         'python_notifications': {'link': 'VARCHAR'},

@@ -197,7 +197,8 @@ async def throttle(session, request, account, action='login'):
     expires = (bucket + 1) * window
     ip = request.client.host if request.client else 'unknown'
     # Never trust forwarded IP headers without a configured proxy trust boundary.
-    subjects = [(f'{action}:ip:{ip}', 30), (f'{action}:account:{account}', 10)]
+    ip_limit = int(os.getenv('AUTH_IP_RATE_LIMIT', '30'))
+    subjects = [(f'{action}:ip:{ip}', ip_limit), (f'{action}:account:{account}', 10)]
     insert = sqlite_insert if session.bind.dialect.name == 'sqlite' else pg_insert
     exceeded = False
     await session.execute(delete(LoginRateModel).where(LoginRateModel.expires_at <= now))
