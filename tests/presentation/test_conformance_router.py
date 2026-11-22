@@ -262,3 +262,77 @@ def test_generic_webhook_subscriptions_and_deliveries(client):
     assert client.put('/webhooks/subscriptions/missing-id', json={'isActive': False}).status_code == 404
 
     assert client.delete(f"/webhooks/subscriptions/{sub['id']}").json()['deleted'] is True
+
+
+@pytest.mark.asyncio
+async def test_conformance_router_handlers_direct_async(db_session):
+    from types import SimpleNamespace
+    from src.presentation import conformance_router as cr
+    from src.infrastructure.conformance_models import record_stock_compliance_and_webhooks
+
+    req = SimpleNamespace(state=SimpleNamespace(tenant_id='tenant-direct', user_id='user-direct'))
+
+    # 1. RFID
+    t1 = await cr.assign_rfid_tag(cr.RfidAssignDTO(epc='EPC-D1', sku='SKU-D1', serialNumber='SN-D1'), req, db_session)
+    t2 = await cr.assign_rfid_tag(cr.RfidAssignDTO(epc='EPC-D1', sku='SKU-D2', serialNumber='SN-D2'), req, db_session)
+    assert t1['id'] == t2['id']
+    tags = await cr.list_rfid_tags(req, db_session)
+    assert len(tags['tags']) == 1
+
+    # 2. Cache & AI
+    assert (await cr.clear_cache_endpoint(req))['cleared'] is True
+    assert (await cr.cache_stats_endpoint(req))['activeKeysCount'] == 0
+    assert (await cr.analyze_anomalies(req))['overallRiskScore'] == 0
+    assert (await cr.rebalance_matrix(req))['summary']['totalRecommendations'] == 0
+
+    # 3. Compliance ledger + webhooks
+    sub = await cr.create_webhook_subscription(
+        cr.WebhookSubscriptionCreateDTO(targetUrl='https://192.0.2.1/wh', secret='s', eventTypes=['StockReceived']),
+        req, db_session,
+    )
+    assert len(await cr.list_webhook_subscriptions(req, db_session)) == 1
+    await record_stock_compliance_and_webhooks(db_session, 'tenant-direct', 'user-direct', 'receive', 'SKU-D1', 'default', 10, {'quantity': 10})
+    await db_session.commit()
+    await record_stock_compliance_and_webhooks(db_session, 'tenant-direct', 'user-direct', 'dispatch', 'SKU-D1', 'default', 4, {'quantity': 6})
+    await db_session.commit()
+    ledger = await cr.get_compliance_ledger(req, db_session)
+    assert len(ledger) == 2
+    assert (await cr.verify_compliance_ledger(req, db_session))['isValid'] is True
+    state = await cr.reconstruct_compliance_state(req, timestamp=None, session=db_session)
+    assert state['stockLevels'][0]['quantity'] == 6
+    assert len(await cr.replay_compliance_audit(req, timestamp=ledger[0]['timestamp'], upToTimestamp=None, session=db_session)) == 1
+    assert len(await cr.list_webhook_deliveries(req, db_session)) >= 1
+    assert (await cr.update_webhook_subscription(sub['id'], cr.WebhookSubscriptionUpdateDTO(isActive=False), req, db_session))['isActive'] is False
+    assert (await cr.delete_webhook_subscription(sub['id'], req, db_session))['deleted'] is True
+
+    # 4. Cross-dock & drop-ship
+    cd = await cr.evaluate_cross_dock(
+        cr.CrossDockEvaluateDTO(
+            purchaseOrderId='PO-D1',
+            inboundItems=[{'variantId': 'V1', 'quantity': 5}],
+            backorders=[{'orderId': 'O1', 'variantId': 'V1', 'quantity': 3, 'priority': 2}],
+        ),
+        req,
+    )
+    assert cd[0]['recommendedCrossDockQuantity'] == 3
+    ds = await cr.create_drop_ship(cr.DropShipDTO(orderId='O2', variantId='V1', quantity=2, supplierId='SUP-D1'), req, db_session)
+    assert ds['status'] == 'DISPATCHED_TO_SUPPLIER'
+
+    # 5. Lot quarantine/release/FEFO/recall & forecasting
+    assert (await cr.quarantine_lot(cr.LotQuarantineDTO(lotNumber='LOT-D1', reason='QA'), req, db_session))['status'] == 'QUARANTINED'
+    assert (await cr.release_lot(cr.LotQuarantineDTO(lotNumber='LOT-D1'), req, db_session))['status'] == 'AVAILABLE'
+    assert await cr.fefo_pick_suggestions(req, sku='SKU-D1', quantity=1, session=db_session) == []
+    assert await cr.trace_recall('LOT-D1', req, db_session) == []
+    assert await cr.forecasting_report(req, locationId='default', session=db_session) == []
+
+    # 6. Warehouse locations, putaway, pick route, slotting
+    assert await cr.suggest_putaway(cr.PutawayRequestDTO(sku='SKU-D1', quantity=5), req, db_session) == []
+    assert await cr.slotting_suggestions(req, db_session) == []
+    b1 = await cr.create_warehouse_location(cr.WarehouseLocationCreateDTO(warehouseId='WH-D', aisle='01'), req, db_session)
+    b2 = await cr.create_warehouse_location(cr.WarehouseLocationCreateDTO(warehouseId='WH-D', aisle='99'), req, db_session)
+    await cr.create_warehouse_location(cr.WarehouseLocationCreateDTO(id=b1['id'], warehouseId='WH-D', aisle='01', maxWeightGrams=50000), req, db_session)
+    assert len(await cr.list_warehouse_locations(req, db_session)) == 2
+    assert len(await cr.suggest_putaway(cr.PutawayRequestDTO(sku='SKU-D1', quantity=5), req, db_session)) == 1
+    routes = await cr.optimize_pick_route(cr.PickRouteRequestDTO(items=[{'sku': 'S1', 'locationId': b2['id'], 'quantity': 1}, {'sku': 'S2', 'locationId': b1['id'], 'quantity': 2}]), req, db_session)
+    assert [x['locationId'] for x in routes[0]['items']] == [b1['id'], b2['id']]
+    assert (await cr.delete_warehouse_location(b2['id'], req, db_session))['deleted'] is True
