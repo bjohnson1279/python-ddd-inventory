@@ -92,6 +92,9 @@ app.include_router(catalog_router, prefix='/api')
 from src.presentation.accounting_router import router as accounting_router
 app.include_router(accounting_router)
 app.include_router(accounting_router, prefix='/api')
+from src.presentation.conformance_router import router as conformance_router
+app.include_router(conformance_router)
+app.include_router(conformance_router, prefix='/api')
 
 @app.middleware('http')
 async def authenticate(request: Request, call_next):

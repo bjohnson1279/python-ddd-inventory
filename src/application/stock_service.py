@@ -162,8 +162,10 @@ class StockService:
                 result['inputUom'] = conversion
                 if operation == 'receive':
                     result['receiptValueCents'] = receipt_total
-
             self._record_movement(row.id, sku, location, operation, amount, mutation_id, fingerprint, result)
+            from src.infrastructure.conformance_models import record_stock_compliance_and_webhooks
+            await record_stock_compliance_and_webhooks(self.session, self.tenant_id, self.actor_id,
+                                                       operation, sku, location, amount, result)
             if commit:
                 await self.session.commit()
             else:
