@@ -1,107 +1,106 @@
+import json
+from types import SimpleNamespace
 import pytest
-from unittest.mock import AsyncMock
-from fastapi import FastAPI
-from starlette.testclient import TestClient
-from src.presentation.websockets import ConnectionManager, router, manager
-from src.infrastructure.auth.rbac import get_current_user_roles
+from starlette.websockets import WebSocketDisconnect
+
+from src.infrastructure.auth.identity import issue_token
+from src.presentation.websockets import ConnectionManager, _extract_ws_claims, manager
+
+
+class _FakeWebSocket:
+    def __init__(self, headers=None, query_params=None, fail_send=False):
+        self.headers = headers or {}
+        self.query_params = query_params or {}
+        self.accepted = False
+        self.closed_code = None
+        self.sent = []
+        self.fail_send = fail_send
+
+    async def accept(self):
+        self.accepted = True
+
+    async def close(self, code=1000):
+        self.closed_code = code
+
+    async def send_text(self, message: str):
+        if self.fail_send:
+            raise RuntimeError("socket closed")
+        self.sent.append(message)
+
+
+def _token(tenant_id="tenant-ws", roles=None):
+    role = roles[0] if roles else "ADMIN"
+    user = SimpleNamespace(id="user-1", tenant_id=tenant_id, role=role, auth_version=1)
+    return issue_token(user, session_id="sess-1")
+
 
 @pytest.mark.asyncio
-async def test_connection_manager_connect():
+async def test_connection_manager_connect_broadcast_disconnect_and_error_isolation():
     cm = ConnectionManager()
-    ws = AsyncMock()
-    await cm.connect(ws, "tenant-1")
-    ws.accept.assert_awaited_once()
-    assert "tenant-1" in cm.active_connections
-    assert ws in cm.active_connections["tenant-1"]
+    ws_ok = _FakeWebSocket()
+    ws_bad = _FakeWebSocket(fail_send=True)
 
-@pytest.mark.asyncio
-async def test_connection_manager_disconnect():
-    cm = ConnectionManager()
-    ws = AsyncMock()
-    await cm.connect(ws, "tenant-1")
-    cm.disconnect(ws, "tenant-1")
-    assert ws not in cm.active_connections["tenant-1"]
-    # Disconnecting unknown tenant does not raise error
-    cm.disconnect(ws, "tenant-unknown")
+    await cm.connect(ws_ok, "t1")
+    await cm.connect(ws_bad, "t1")
+    assert ws_ok.accepted is True
+    assert len(cm.active_connections["t1"]) == 2
 
-@pytest.mark.asyncio
-async def test_connection_manager_broadcast_to_tenant():
-    cm = ConnectionManager()
-    ws1 = AsyncMock()
-    ws2 = AsyncMock()
-    await cm.connect(ws1, "tenant-1")
-    await cm.connect(ws2, "tenant-1")
+    await cm.broadcast_to_tenant("t1", {"event": "STOCK_RECEIVED", "qty": 5})
+    assert ws_ok.sent == [json.dumps({"event": "STOCK_RECEIVED", "qty": 5})]
 
-    payload = {"type": "stock_updated", "sku": "SKU-1"}
-    await cm.broadcast_to_tenant("tenant-1", payload)
+    # Broadcast to unknown tenant is a safe no-op
+    await cm.broadcast_to_tenant("unknown", {"event": "NONE"})
 
-    expected_msg = '{"type": "stock_updated", "sku": "SKU-1"}'
-    ws1.send_text.assert_awaited_once_with(expected_msg)
-    ws2.send_text.assert_awaited_once_with(expected_msg)
+    cm.disconnect(ws_ok, "t1")
+    assert len(cm.active_connections["t1"]) == 1
+    cm.disconnect(ws_bad, "t1")
+    assert "t1" not in cm.active_connections
 
-@pytest.mark.asyncio
-async def test_connection_manager_broadcast_handles_send_error():
-    cm = ConnectionManager()
-    ws_failing = AsyncMock()
-    ws_failing.send_text.side_effect = Exception("Connection lost")
-    ws_ok = AsyncMock()
-    await cm.connect(ws_failing, "tenant-1")
-    await cm.connect(ws_ok, "tenant-1")
+    # Disconnecting an unknown socket is a safe no-op
+    cm.disconnect(ws_ok, "t1")
 
-    # Should not raise exception
-    await cm.broadcast_to_tenant("tenant-1", {"event": "test"})
-    ws_failing.send_text.assert_awaited_once()
-    ws_ok.send_text.assert_awaited_once()
 
-@pytest.mark.asyncio
-async def test_connection_manager_broadcast_empty_or_missing_tenant():
-    cm = ConnectionManager()
-    # No connections for tenant, should not raise
-    await cm.broadcast_to_tenant("tenant-nonexistent", {"event": "test"})
-    cm.active_connections["tenant-empty"] = []
-    await cm.broadcast_to_tenant("tenant-empty", {"event": "test"})
+def test_extract_ws_claims_header_query_and_invalid():
+    tok = _token("tenant-a", ["MANAGER"])
+    ws_hdr = _FakeWebSocket(headers={"authorization": f"Bearer {tok}"})
+    claims = _extract_ws_claims(ws_hdr)
+    assert claims is not None
+    assert claims["tenantId"] == "tenant-a"
+    assert claims["roles"] == ["MANAGER"]
 
-def test_websocket_endpoint_unauthorized_empty_roles():
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[get_current_user_roles] = lambda: []
+    ws_qp = _FakeWebSocket(query_params={"token": tok})
+    assert _extract_ws_claims(ws_qp)["tenantId"] == "tenant-a"
 
-    client = TestClient(app)
-    with client.websocket_connect("/ws/tenant-1") as ws:
-        msg = ws.receive()
-        assert msg["type"] == "websocket.close"
-        assert msg["code"] == 1008
+    assert _extract_ws_claims(_FakeWebSocket()) is None
+    assert _extract_ws_claims(_FakeWebSocket(headers={"authorization": "Basic abc"})) is None
+    assert _extract_ws_claims(_FakeWebSocket(headers={"authorization": "Bearer invalid.jwt.token"})) is None
 
-def test_websocket_endpoint_unauthorized_invalid_role():
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[get_current_user_roles] = lambda: ["GUEST"]
 
-    client = TestClient(app)
-    with client.websocket_connect("/ws/tenant-1") as ws:
-        msg = ws.receive()
-        assert msg["type"] == "websocket.close"
-        assert msg["code"] == 1008
+def test_websocket_endpoint_rejects_unauthenticated_and_tenant_mismatch(client):
+    # Missing token -> closed with 1008
+    with client.websocket_connect("/ws/tenant-ws") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_text()
+        assert exc_info.value.code == 1008
 
-def test_websocket_endpoint_authorized_admin():
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[get_current_user_roles] = lambda: ["ADMIN"]
+    # Tenant mismatch -> closed with 1008
+    wrong_tenant_tok = _token("other-tenant", ["ADMIN"])
+    with client.websocket_connect(f"/ws/tenant-ws?token={wrong_tenant_tok}") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_text()
+        assert exc_info.value.code == 1008
 
-    client = TestClient(app)
-    with client.websocket_connect("/ws/tenant-test") as ws:
-        assert "tenant-test" in manager.active_connections
-        assert len(manager.active_connections["tenant-test"]) == 1
+    # Forbidden role -> closed with 1008
+    bad_role_tok = _token("tenant-ws", ["SUPPLIER_USER"])
+    with client.websocket_connect(f"/ws/tenant-ws?token={bad_role_tok}") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_text()
+        assert exc_info.value.code == 1008
+
+
+def test_websocket_endpoint_authenticated_connect_and_disconnect(client):
+    tok = _token("tenant-ws", ["ADMIN"])
+    with client.websocket_connect("/ws/tenant-ws", headers={"Authorization": f"Bearer {tok}"}) as ws:
+        assert "tenant-ws" in manager.active_connections
         ws.send_text("ping")
-    assert len(manager.active_connections["tenant-test"]) == 0
-
-def test_websocket_endpoint_authorized_user():
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[get_current_user_roles] = lambda: ["USER"]
-
-    client = TestClient(app)
-    with client.websocket_connect("/ws/tenant-user") as ws:
-        assert "tenant-user" in manager.active_connections
-        assert len(manager.active_connections["tenant-user"]) == 1
-    assert len(manager.active_connections["tenant-user"]) == 0
+    assert "tenant-ws" not in manager.active_connections

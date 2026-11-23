@@ -1,13 +1,40 @@
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import List, Dict
 import logging
 import json
-from src.infrastructure.auth.rbac import get_current_user_roles
+import jwt
+from src.infrastructure.auth.identity import decode_token
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+ALLOWED_WS_ROLES = {"ADMIN", "MANAGER", "USER", "VIEWER"}
+
+
+def _extract_ws_claims(websocket: WebSocket) -> dict | None:
+    """Extract and validate JWT claims from WebSocket Authorization header or token query param."""
+    auth_header = websocket.headers.get("authorization")
+    token: str | None = None
+    if auth_header:
+        scheme, _, candidate = auth_header.partition(" ")
+        if scheme.lower() == "bearer" and candidate:
+            token = candidate
+    if not token:
+        token = websocket.query_params.get("token")
+    if not token:
+        return None
+    try:
+        claims = decode_token(token)
+        if not isinstance(claims.get("tenantId"), str) or not claims["tenantId"]:
+            return None
+        if not isinstance(claims.get("roles"), list):
+            return None
+        return claims
+    except jwt.InvalidTokenError:
+        return None
+
 
 class ConnectionManager:
     def __init__(self):
@@ -22,8 +49,10 @@ class ConnectionManager:
         logger.info(f"WebSocket connected for tenant {tenant_id}")
 
     def disconnect(self, websocket: WebSocket, tenant_id: str):
-        if tenant_id in self.active_connections:
+        if tenant_id in self.active_connections and websocket in self.active_connections[tenant_id]:
             self.active_connections[tenant_id].remove(websocket)
+            if not self.active_connections[tenant_id]:
+                del self.active_connections[tenant_id]
             logger.info(f"WebSocket disconnected for tenant {tenant_id}")
 
     async def broadcast_to_tenant(self, tenant_id: str, message: dict):
@@ -41,16 +70,26 @@ class ConnectionManager:
             # Impact: Reduced local benchmark total broadcast time from ~1.26s to ~0.03s for 1000 connections
             await asyncio.gather(*(safe_send(conn) for conn in self.active_connections[tenant_id]))
 
+
 manager = ConnectionManager()
 
+
 @router.websocket("/ws/{tenant_id}")
-async def websocket_endpoint(websocket: WebSocket, tenant_id: str, user_roles: List[str] = Depends(get_current_user_roles)):
+async def websocket_endpoint(websocket: WebSocket, tenant_id: str):
     """
     WebSocket endpoint for Real-Time Collaborative UI sync.
     Broadcasts stock changes, discrepancy updates, and webhook delivery issues.
     """
-    if not user_roles or not set(['ADMIN', 'MANAGER', 'USER']).intersection(user_roles):
+    claims = _extract_ws_claims(websocket)
+    if not claims or claims["tenantId"] != tenant_id:
         logger.warning(f"Unauthorized WebSocket connection attempt for tenant {tenant_id}")
+        await websocket.accept()
+        await websocket.close(code=1008)
+        return
+
+    normalized_roles = {str(r).upper() for r in claims["roles"]}
+    if not ALLOWED_WS_ROLES.intersection(normalized_roles):
+        logger.warning(f"Forbidden WebSocket role attempt for tenant {tenant_id}")
         await websocket.accept()
         await websocket.close(code=1008)
         return
@@ -59,7 +98,6 @@ async def websocket_endpoint(websocket: WebSocket, tenant_id: str, user_roles: L
     try:
         while True:
             # Keep the connection open and listen for client messages if needed
-            data = await websocket.receive_text()
-            # For now, we only push from server to client
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket, tenant_id)

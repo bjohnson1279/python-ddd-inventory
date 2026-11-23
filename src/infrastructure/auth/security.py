@@ -5,6 +5,7 @@ import os
 import time
 from datetime import datetime, timezone
 from fastapi import Depends, HTTPException, Request
+from starlette.requests import HTTPConnection
 from sqlalchemy import select, delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -144,7 +145,9 @@ def stock_response(request, result):
     return masked
 
 
-async def authorize_request(request: Request, session: AsyncSession = Depends(get_db_session)):
+async def authorize_request(request: HTTPConnection, session: AsyncSession = Depends(get_db_session)):
+    if not isinstance(request, Request):
+        return  # WebSocket endpoints enforce JWT and tenant authorization directly.
     if request.method == 'POST' and request.url.path.startswith('/webhooks/integrations/') and request.url.path.endswith('/orders'):
         return  # Connection-specific HMAC is enforced by the webhook handler.
     if (request.method, request.url.path) in PUBLIC:
