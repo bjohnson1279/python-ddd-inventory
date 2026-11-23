@@ -95,6 +95,11 @@ app.include_router(accounting_router, prefix='/api')
 from src.presentation.conformance_router import router as conformance_router
 app.include_router(conformance_router)
 app.include_router(conformance_router, prefix='/api')
+from src.presentation.advanced_capabilities_router import router as advanced_capabilities_router
+app.include_router(advanced_capabilities_router)
+app.include_router(advanced_capabilities_router, prefix='/api')
+from src.presentation.websockets import router as websockets_router
+app.include_router(websockets_router)
 
 @app.middleware('http')
 async def authenticate(request: Request, call_next):
