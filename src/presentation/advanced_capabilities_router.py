@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -8,7 +8,9 @@ from src.infrastructure.auth.identity import current_tenant
 from src.domain.routing import Location, OrderLine, StockLevel, OrderRoutingEngine
 from src.domain.hardware.printer import ThermalPrinterEngine, ARGuidanceEngine
 from src.domain.ai_models.copilot import WarehouseDigitalTwin, ConversationalAICopilot
+from src.domain.ai_models.predictive_engine import PredictiveEngine
 from src.domain.analytics.esg import ESGEmissionsTracker
+from src.domain.workflow import ApprovalWorkflowEngine, WorkflowExecution
 from src.domain.intercompany.entity import (
     IntercompanyTransfer,
     TransferPricingRule,
@@ -371,3 +373,168 @@ async def recommend_yield_markdown(data: YieldMarkdownRequestDTO, request: Reque
             "status": rec.status.value,
         },
     }
+
+
+# --- 5.3 Demand Forecasting, 6.3 Slotting & 9.1 Predictive Anomaly Detection ---
+
+class ForecastingRopDTO(BaseModel):
+    sku: str = Field(min_length=1)
+    historicalSales: List[int] = Field(default_factory=list)
+    leadTimeDays: int = Field(ge=0)
+
+
+class ForecastingSlottingDTO(BaseModel):
+    warehouseMap: Dict[str, Any] = Field(default_factory=dict)
+    skuVelocity: Dict[str, float] = Field(default_factory=dict)
+
+
+class ForecastingTransactionDTO(BaseModel):
+    sku: str = Field(min_length=1)
+    quantityAdjustment: int
+    timestamp: Optional[str] = None
+
+
+class ForecastingAnomaliesDTO(BaseModel):
+    recentTransactions: List[ForecastingTransactionDTO] = Field(default_factory=list)
+
+
+@router.post("/forecasting/rop")
+async def calculate_forecasting_rop(data: ForecastingRopDTO, request: Request):
+    tenant = current_tenant(request)
+    rop = PredictiveEngine().calculate_dynamic_rop(
+        sku=data.sku,
+        historical_sales=data.historicalSales,
+        lead_time_days=data.leadTimeDays,
+    )
+    return {"tenantId": tenant, "sku": data.sku, "reorderPoint": rop}
+
+
+@router.post("/forecasting/slotting")
+async def optimize_forecasting_slotting(data: ForecastingSlottingDTO, request: Request):
+    tenant = current_tenant(request)
+    recs = PredictiveEngine().optimize_slotting(data.warehouseMap, data.skuVelocity)
+    return {"tenantId": tenant, "recommendations": recs}
+
+
+@router.post("/forecasting/anomalies")
+async def detect_forecasting_anomalies(data: ForecastingAnomaliesDTO, request: Request):
+    tenant = current_tenant(request)
+    txns = []
+    for item in data.recentTransactions:
+        row: Dict[str, Any] = {"sku": item.sku, "quantity_adjustment": item.quantityAdjustment}
+        if item.timestamp:
+            try:
+                row["timestamp"] = datetime.fromisoformat(item.timestamp.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Invalid timestamp: {item.timestamp}") from exc
+        txns.append(row)
+    flagged = PredictiveEngine().detect_anomalies(txns)
+    return {
+        "tenantId": tenant,
+        "anomalies": [
+            {
+                "sku": f["sku"],
+                "quantityAdjustment": f["quantity_adjustment"],
+                "timestamp": f["timestamp"].isoformat() if "timestamp" in f else None,
+            }
+            for f in flagged
+        ],
+    }
+
+
+# --- 12.2 Configurable Approval Workflows ---
+
+_TENANT_WORKFLOW_ENGINES: Dict[str, ApprovalWorkflowEngine] = {}
+_TENANT_WORKFLOW_EXECUTIONS: Dict[str, Dict[str, WorkflowExecution]] = {}
+
+
+def _workflow_engine_for(tenant_id: str) -> ApprovalWorkflowEngine:
+    if tenant_id not in _TENANT_WORKFLOW_ENGINES:
+        _TENANT_WORKFLOW_ENGINES[tenant_id] = ApprovalWorkflowEngine()
+    return _TENANT_WORKFLOW_ENGINES[tenant_id]
+
+
+def _serialize_execution(tenant_id: str, execution: WorkflowExecution) -> Dict[str, Any]:
+    return {
+        "tenantId": tenant_id,
+        "executionId": execution.execution_id,
+        "triggerEvent": execution.trigger_event,
+        "status": execution.status.value,
+        "payload": execution.payload,
+        "steps": [
+            {
+                "role": s.role,
+                "status": s.status.value,
+                "approvedBy": s.approved_by,
+                "approvedAt": s.approved_at.isoformat() if s.approved_at else None,
+                "comments": s.comments,
+            }
+            for s in execution.steps
+        ],
+    }
+
+
+class WorkflowTemplateDTO(BaseModel):
+    eventName: str = Field(min_length=1)
+    requiredRoles: List[str] = Field(min_length=1)
+
+
+class WorkflowStartDTO(BaseModel):
+    eventName: str = Field(min_length=1)
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowDecisionDTO(BaseModel):
+    role: str = Field(min_length=1)
+    userId: str = Field(min_length=1)
+    comments: str = ""
+
+
+@router.post("/workflows/templates", status_code=201)
+async def register_workflow_template(data: WorkflowTemplateDTO, request: Request):
+    tenant = current_tenant(request)
+    engine = _workflow_engine_for(tenant)
+    engine.register_template(data.eventName, data.requiredRoles)
+    return {"tenantId": tenant, "eventName": data.eventName, "requiredRoles": data.requiredRoles}
+
+
+@router.post("/workflows/start", status_code=201)
+async def start_approval_workflow(data: WorkflowStartDTO, request: Request):
+    tenant = current_tenant(request)
+    engine = _workflow_engine_for(tenant)
+    execution = engine.start_workflow(data.eventName, data.payload)
+    if execution is None:
+        raise HTTPException(status_code=404, detail=f"No workflow template registered for {data.eventName}")
+    _TENANT_WORKFLOW_EXECUTIONS.setdefault(tenant, {})[execution.execution_id] = execution
+    return _serialize_execution(tenant, execution)
+
+
+@router.get("/workflows/{execution_id}")
+async def get_approval_workflow(execution_id: str, request: Request):
+    tenant = current_tenant(request)
+    execution = _TENANT_WORKFLOW_EXECUTIONS.get(tenant, {}).get(execution_id)
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Workflow execution not found")
+    return _serialize_execution(tenant, execution)
+
+
+@router.post("/workflows/{execution_id}/approve")
+async def approve_workflow_step(execution_id: str, data: WorkflowDecisionDTO, request: Request):
+    tenant = current_tenant(request)
+    execution = _TENANT_WORKFLOW_EXECUTIONS.get(tenant, {}).get(execution_id)
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Workflow execution not found")
+    if not execution.approve_step(data.role, data.userId, data.comments):
+        raise HTTPException(status_code=409, detail=f"No pending step for role {data.role}")
+    return _serialize_execution(tenant, execution)
+
+
+@router.post("/workflows/{execution_id}/reject")
+async def reject_workflow_step(execution_id: str, data: WorkflowDecisionDTO, request: Request):
+    tenant = current_tenant(request)
+    execution = _TENANT_WORKFLOW_EXECUTIONS.get(tenant, {}).get(execution_id)
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Workflow execution not found")
+    if not execution.reject_step(data.role, data.userId, data.comments):
+        raise HTTPException(status_code=409, detail=f"No pending step for role {data.role}")
+    return _serialize_execution(tenant, execution)

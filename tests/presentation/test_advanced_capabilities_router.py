@@ -295,3 +295,170 @@ async def test_advanced_capabilities_handlers_direct_async():
         req,
     )
     assert y_none["recommendation"] is None
+
+
+def test_forecasting_and_approval_workflows_http_routes(client):
+    # 5.3 / 6.3 / 9.1 Forecasting, slotting & anomalies
+    r_rop = client.post(
+        "/api/forecasting/rop",
+        json={"sku": "SKU-F1", "historicalSales": [10, 20, 30], "leadTimeDays": 5},
+    )
+    assert r_rop.status_code == 200
+    assert r_rop.json()["reorderPoint"] == 150.0
+
+    r_slot = client.post(
+        "/api/forecasting/slotting",
+        json={"warehouseMap": {"zones": ["A", "B"]}, "skuVelocity": {"SKU-FAST": 150.0, "SKU-SLOW": 10.0}},
+    )
+    assert r_slot.status_code == 200
+    assert len(r_slot.json()["recommendations"]) == 1
+    assert r_slot.json()["recommendations"][0]["sku"] == "SKU-FAST"
+
+    r_anom = client.post(
+        "/api/forecasting/anomalies",
+        json={
+            "recentTransactions": [
+                {"sku": "SKU-A1", "quantityAdjustment": -80, "timestamp": "2026-10-12T03:00:00Z"},
+                {"sku": "SKU-A2", "quantityAdjustment": -5, "timestamp": "2026-10-12T12:00:00Z"},
+            ]
+        },
+    )
+    assert r_anom.status_code == 200
+    assert len(r_anom.json()["anomalies"]) == 1
+    assert r_anom.json()["anomalies"][0]["sku"] == "SKU-A1"
+
+    r_anom_bad = client.post(
+        "/api/forecasting/anomalies",
+        json={"recentTransactions": [{"sku": "SKU-A1", "quantityAdjustment": -80, "timestamp": "bad-ts"}]},
+    )
+    assert r_anom_bad.status_code == 422
+
+    # 12.2 Approval Workflows
+    r_tpl = client.post(
+        "/api/workflows/templates",
+        json={"eventName": "HIGH_VALUE_ADJUSTMENT", "requiredRoles": ["MANAGER", "FINANCE"]},
+    )
+    assert r_tpl.status_code == 201
+
+    r_start_missing = client.post("/api/workflows/start", json={"eventName": "UNKNOWN_EVENT", "payload": {}})
+    assert r_start_missing.status_code == 404
+
+    r_start = client.post(
+        "/api/workflows/start",
+        json={"eventName": "HIGH_VALUE_ADJUSTMENT", "payload": {"sku": "SKU-1", "delta": -100}},
+    )
+    assert r_start.status_code == 201
+    exec_id = r_start.json()["executionId"]
+    assert r_start.json()["status"] == "IN_PROGRESS"
+
+    r_get = client.get(f"/api/workflows/{exec_id}")
+    assert r_get.status_code == 200
+    assert r_get.json()["executionId"] == exec_id
+
+    r_app1 = client.post(
+        f"/api/workflows/{exec_id}/approve",
+        json={"role": "MANAGER", "userId": "u-mgr", "comments": "Verified"},
+    )
+    assert r_app1.status_code == 200
+    assert r_app1.json()["status"] == "IN_PROGRESS"
+
+    r_app2 = client.post(
+        f"/api/workflows/{exec_id}/approve",
+        json={"role": "FINANCE", "userId": "u-fin", "comments": "Approved"},
+    )
+    assert r_app2.status_code == 200
+    assert r_app2.json()["status"] == "APPROVED"
+
+    # Rejecting an already approved execution returns 409
+    r_rej_conflict = client.post(
+        f"/api/workflows/{exec_id}/reject",
+        json={"role": "MANAGER", "userId": "u-mgr", "comments": "Too late"},
+    )
+    assert r_rej_conflict.status_code == 409
+
+    # Start a second workflow and reject it
+    r_start2 = client.post("/api/workflows/start", json={"eventName": "HIGH_VALUE_ADJUSTMENT", "payload": {}})
+    exec_id2 = r_start2.json()["executionId"]
+    r_rej = client.post(
+        f"/api/workflows/{exec_id2}/reject",
+        json={"role": "MANAGER", "userId": "u-mgr", "comments": "Insufficient proof"},
+    )
+    assert r_rej.status_code == 200
+    assert r_rej.json()["status"] == "REJECTED"
+
+
+@pytest.mark.asyncio
+async def test_forecasting_and_workflow_handlers_direct_async():
+    req_a = _fake_request("tenant-wf-a")
+    req_b = _fake_request("tenant-wf-b")
+
+    rop = await acr.calculate_forecasting_rop(
+        acr.ForecastingRopDTO(sku="S1", historicalSales=[5, 10], leadTimeDays=2),
+        req_a,
+    )
+    assert rop["reorderPoint"] == 20.0
+
+    slot = await acr.optimize_forecasting_slotting(
+        acr.ForecastingSlottingDTO(warehouseMap={}, skuVelocity={"S1": 200.0}),
+        req_a,
+    )
+    assert len(slot["recommendations"]) == 1
+
+    anom = await acr.detect_forecasting_anomalies(
+        acr.ForecastingAnomaliesDTO(
+            recentTransactions=[acr.ForecastingTransactionDTO(sku="S1", quantityAdjustment=-99, timestamp="2026-10-01T02:00:00Z")]
+        ),
+        req_a,
+    )
+    assert len(anom["anomalies"]) == 1
+
+    with pytest.raises(HTTPException) as bad_ts:
+        await acr.detect_forecasting_anomalies(
+            acr.ForecastingAnomaliesDTO(
+                recentTransactions=[acr.ForecastingTransactionDTO(sku="S1", quantityAdjustment=-99, timestamp="invalid")]
+            ),
+            req_a,
+        )
+    assert bad_ts.value.status_code == 422
+
+    await acr.register_workflow_template(
+        acr.WorkflowTemplateDTO(eventName="PO_APPROVAL", requiredRoles=["MANAGER"]),
+        req_a,
+    )
+    started = await acr.start_approval_workflow(acr.WorkflowStartDTO(eventName="PO_APPROVAL", payload={"po": "1"}), req_a)
+    eid = started["executionId"]
+
+    # Cross-tenant isolation: tenant-wf-b cannot read/approve/reject tenant-wf-a's execution
+    with pytest.raises(HTTPException) as not_found_get:
+        await acr.get_approval_workflow(eid, req_b)
+    assert not_found_get.value.status_code == 404
+
+    with pytest.raises(HTTPException) as not_found_app:
+        await acr.approve_workflow_step(eid, acr.WorkflowDecisionDTO(role="MANAGER", userId="u1"), req_b)
+    assert not_found_app.value.status_code == 404
+
+    with pytest.raises(HTTPException) as not_found_rej:
+        await acr.reject_workflow_step(eid, acr.WorkflowDecisionDTO(role="MANAGER", userId="u1"), req_b)
+    assert not_found_rej.value.status_code == 404
+
+    with pytest.raises(HTTPException) as missing_tpl:
+        await acr.start_approval_workflow(acr.WorkflowStartDTO(eventName="MISSING", payload={}), req_a)
+    assert missing_tpl.value.status_code == 404
+
+    fetched = await acr.get_approval_workflow(eid, req_a)
+    assert fetched["status"] == "IN_PROGRESS"
+
+    approved = await acr.approve_workflow_step(eid, acr.WorkflowDecisionDTO(role="MANAGER", userId="u1"), req_a)
+    assert approved["status"] == "APPROVED"
+
+    with pytest.raises(HTTPException) as conflict_app:
+        await acr.approve_workflow_step(eid, acr.WorkflowDecisionDTO(role="MANAGER", userId="u1"), req_a)
+    assert conflict_app.value.status_code == 409
+
+    started2 = await acr.start_approval_workflow(acr.WorkflowStartDTO(eventName="PO_APPROVAL", payload={}), req_a)
+    rejected = await acr.reject_workflow_step(started2["executionId"], acr.WorkflowDecisionDTO(role="MANAGER", userId="u2"), req_a)
+    assert rejected["status"] == "REJECTED"
+
+    with pytest.raises(HTTPException) as conflict_rej:
+        await acr.reject_workflow_step(started2["executionId"], acr.WorkflowDecisionDTO(role="MANAGER", userId="u2"), req_a)
+    assert conflict_rej.value.status_code == 409
